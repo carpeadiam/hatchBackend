@@ -1,2 +1,3 @@
 flask
-pyodbc
+gunicorn
+psycopg2-binary
