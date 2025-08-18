@@ -2,12 +2,19 @@ import os
 import psycopg2
 import jwt
 import uuid
+import logging
 from flask import Flask, request, jsonify
 from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from pymongo import MongoClient
 
+# --- Logging setup ---
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # --- Config ---
@@ -132,6 +139,8 @@ def hack_create():
     data = request.get_json(silent=True) or {}
     user_email = request.user["email"]
 
+    logger.debug("Received hackathon create request from user=%s, data=%s", user_email, data)
+
     # generate unique code
     hack_code = "HACK-" + uuid.uuid4().hex[:8].upper()
 
@@ -142,13 +151,19 @@ def hack_create():
 
     try:
         result = hackathons.insert_one(hackathon_doc)
+        logger.info("Hackathon created successfully: hackCode=%s id=%s", hack_code, result.inserted_id)
         return jsonify({
             "message": "Hackathon created",
             "hackCode": hack_code,
             "id": str(result.inserted_id)
         }), 201
     except Exception as e:
-        return jsonify({"error": "MongoDB insert failed", "details": str(e)}), 500
+        logger.exception("Error while inserting hackathon into MongoDB")
+        return jsonify({
+            "error": "MongoDB insert failed",
+            "details": str(e),
+            "event": hackathon_doc
+        }), 500
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
