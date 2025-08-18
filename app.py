@@ -165,5 +165,11 @@ def hack_create():
             "event": hackathon_doc
         }), 500
 
+@app.route("/allHacks", methods=["GET"])
+def get_all_hacks():
+    hacks = list(hackathons_collection.find({}, {"_id": 0}))  
+    # ^ exclude _id because it's not JSON serializable
+    return jsonify(hacks)
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
