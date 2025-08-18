@@ -1,16 +1,24 @@
 import os
 import psycopg2
 import jwt
+import uuid
 from flask import Flask, request, jsonify
 from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
+from pymongo import MongoClient
 
 app = Flask(__name__)
 
 # --- Config ---
 DB_CONNECTION = os.getenv("AZURE_POSTGRESQL_CONNECTIONSTRING")
-SECRET_KEY = os.getenv("SECRET_KEY", "change-this-in-azure")  # set this in App Service > Configuration
+SECRET_KEY = os.getenv("SECRET_KEY", "change-this-in-azure")
+
+# MongoDB connection
+MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://Hatchify:HatchMeBaby@hatch.tjat4ce.mongodb.net/?retryWrites=true&w=majority&appName=Hatch")
+mongo_client = MongoClient(MONGO_URI)
+mongo_db = mongo_client["hackdb"]             # database name
+hackathons = mongo_db["hackathons"]           # collection name
 
 # --- DB helpers ---
 def get_connection():
@@ -19,7 +27,6 @@ def get_connection():
     return psycopg2.connect(DB_CONNECTION, cursor_factory=RealDictCursor)
 
 def create_users_table():
-    """Create Users table if not exists."""
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
@@ -37,7 +44,6 @@ create_users_table()
 
 # --- Auth helpers ---
 def create_token(user_id, email):
-    # No expiration as requested
     payload = {"user_id": user_id, "email": email}
     return jwt.encode(payload, SECRET_KEY, algorithm="HS256")
 
@@ -53,7 +59,7 @@ def token_required(f):
         token = auth_header.split(" ", 1)[1].strip()
         try:
             user = decode_token(token)
-            request.user = user  # attach to request context
+            request.user = user
         except jwt.InvalidTokenError:
             return jsonify({"error": "Invalid token"}), 401
         return f(*args, **kwargs)
@@ -80,14 +86,12 @@ def signup():
     try:
         conn = get_connection()
         cur = conn.cursor()
-        # check duplicate
         cur.execute("SELECT id FROM Users WHERE email = %s", (email,))
         if cur.fetchone():
             cur.close(); conn.close()
             return jsonify({"error": "User already exists"}), 409
 
-        cur.execute("INSERT INTO Users (email, password) VALUES (%s, %s) RETURNING id;",
-                    (email, hashed))
+        cur.execute("INSERT INTO Users (email, password) VALUES (%s, %s) RETURNING id;", (email, hashed))
         user_id = cur.fetchone()["id"]
         conn.commit()
         cur.close(); conn.close()
@@ -121,19 +125,30 @@ def login():
     except Exception as e:
         return jsonify({"error": "Server error", "details": str(e)}), 500
 
-@app.route("/me", methods=["GET"])
+@app.route("/hack-create", methods=["POST"])
 @token_required
-def me():
-    # Example protected route
-    return jsonify({"user": request.user})
+def hack_create():
+    """Create a hackathon entry in MongoDB"""
+    data = request.get_json(silent=True) or {}
+    user_email = request.user["email"]
 
-# Example of another protected route
-@app.route("/secure-action", methods=["POST"])
-@token_required
-def secure_action():
-    # Do something user-specific; request.user has user_id/email from token
-    return jsonify({"ok": True, "performed_by": request.user["email"]})
+    # generate unique code
+    hack_code = "HACK-" + uuid.uuid4().hex[:8].upper()
+
+    # extend data with admins list + code
+    hackathon_doc = data.copy()
+    hackathon_doc["hackCode"] = hack_code
+    hackathon_doc["admins"] = [user_email]
+
+    try:
+        result = hackathons.insert_one(hackathon_doc)
+        return jsonify({
+            "message": "Hackathon created",
+            "hackCode": hack_code,
+            "id": str(result.inserted_id)
+        }), 201
+    except Exception as e:
+        return jsonify({"error": "MongoDB insert failed", "details": str(e)}), 500
 
 if __name__ == "__main__":
-    # For local debugging; Azure will use gunicorn
     app.run(host="0.0.0.0", port=8000, debug=True)
