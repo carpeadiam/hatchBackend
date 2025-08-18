@@ -22,7 +22,7 @@ DB_CONNECTION = os.getenv("AZURE_POSTGRESQL_CONNECTIONSTRING")
 SECRET_KEY = os.getenv("SECRET_KEY", "change-this-in-azure")
 
 # MongoDB connection
-MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://Hatchify:HatchMeBaby@hatch.tjat4ce.mongodb.net/?retryWrites=true&w=majority&appName=Hatch")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://Hatchify:HatchMeBaby@hatch.tjat4ce.mongodb.net/?retryWrites=true&w=majority&ssl=true&appName=Hatch")
 mongo_client = MongoClient(MONGO_URI)
 mongo_db = mongo_client["hackdb"]             # database name
 hackathons = mongo_db["hackathons"]           # collection name
