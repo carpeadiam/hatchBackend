@@ -346,7 +346,6 @@ def manage_hack():
 
     else:
         return jsonify({"error": f"Unknown action: {action}"}), 400
-
 @app.route("/getTeamDetails", methods=["POST"])
 @token_required
 def get_team_details():
@@ -363,15 +362,22 @@ def get_team_details():
 
     user_doc = users_collection.find_one({"email": email})
     if not user_doc:
-        return jsonify({"error": "User not found"}), 404
+        return jsonify({
+            "message": "User not found",
+            "registrationStatus": "no"
+        }), 200
 
     # --- Step 2: Verify hackCode in hackathonsRegistered ---
     reg_entry = next(
         (h for h in user_doc.get("hackathonsRegistered", []) if h["hackCode"] == hack_code),
         None
     )
+
     if not reg_entry:
-        return jsonify({"error": "User not registered in this hackathon"}), 400
+        return jsonify({
+            "message": f"User {email} is not registered in hackathon {hack_code}",
+            "registrationStatus": "no"
+        }), 200
 
     team_id = reg_entry["teamId"]
 
@@ -385,11 +391,10 @@ def get_team_details():
         (t for t in hackathon_doc.get("registrations", []) if t["teamId"] == team_id),
         None
     )
-    if not team_details:
-        return jsonify({"error": "Team details not found in hackathon"}), 404
 
     return jsonify({
         "message": "Team details fetched successfully",
+        "registrationStatus": "yes",
         "hackathon": {
             "hackCode": hackathon_doc.get("hackCode"),
             "eventName": hackathon_doc.get("eventName"),
@@ -399,8 +404,6 @@ def get_team_details():
         },
         "team": team_details
     }), 200
-
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
