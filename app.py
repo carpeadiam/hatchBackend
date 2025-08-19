@@ -11,6 +11,7 @@ from pymongo import MongoClient
 from email.message import EmailMessage
 import ssl
 import smtplib
+from datetime import datetime
 
 # --- Logging setup ---
 logging.basicConfig(
@@ -31,8 +32,8 @@ mongo_db = mongo_client["hackdb"]             # database name
 hackathons = mongo_db["hackathons"]           # collection name
 
 # Email credentials (use env vars ideally)
-EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS", "adi.profile1@gmail.com")  # Replace with your Gmail address
-EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "gwaryitmlyzygepr")   # Use app password (not your login password)
+EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS", "youremail@gmail.com")  # Replace with your Gmail address
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "your_app_password")   # Use app password (not your login password)
 
 # --- DB helpers ---
 def get_connection():
@@ -597,6 +598,113 @@ def fetch_submissions():
         "submissions": team.get("submissions", [])
     }), 200
 
+@app.route("/announcement", methods=["POST"])
+@token_required
+def create_announcement():
+    """
+    Create an announcement for a hackathon (admin only).
+    Payload:
+    {
+        "hackCode": "HACK-XXXX",
+        "title": "Announcement Title",
+        "content": "Announcement content...",
+        "expiryDate": "2025-08-25T23:59:59Z"  # ISO format
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    hack_code = data.get("hackCode")
+    title = data.get("title", "").strip()
+    content = data.get("content", "").strip()
+    expiry_date = data.get("expiryDate", "").strip()
+    user_email = request.user["email"]
+
+    # Validation
+    if not hack_code or not title or not content or not expiry_date:
+        return jsonify({"error": "hackCode, title, content, and expiryDate are required"}), 400
+
+    # Validate expiry date format
+    try:
+        expiry_datetime = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
+        if expiry_datetime <= datetime.now():
+            return jsonify({"error": "Expiry date must be in the future"}), 400
+    except ValueError:
+        return jsonify({"error": "Invalid expiryDate format. Use ISO format (e.g., 2025-08-25T23:59:59Z)"}), 400
+
+    # Fetch hackathon
+    hack = hackathons.find_one({"hackCode": hack_code})
+    if not hack:
+        return jsonify({"error": "Hackathon not found"}), 404
+
+    # Check if user is admin
+    if user_email not in hack.get("admins", []):
+        return jsonify({"error": "Not authorized. Only admins can create announcements."}), 403
+
+    # Create announcement object
+    announcement = {
+        "id": str(uuid.uuid4()),
+        "title": title,
+        "content": content,
+        "createdBy": user_email,
+        "createdAt": datetime.now().isoformat() + "Z",
+        "expiryDate": expiry_date
+    }
+
+    # Add announcement to hackathon
+    hackathons.update_one(
+        {"hackCode": hack_code},
+        {"$push": {"announcements": announcement}}
+    )
+
+    logger.info("Announcement created for hackathon %s by %s", hack_code, user_email)
+
+    return jsonify({
+        "message": "Announcement created successfully",
+        "announcement": announcement
+    }), 201
+
+
+@app.route("/announcements", methods=["GET"])
+def get_announcements():
+    """
+    Get active announcements for a hackathon.
+    Query params: ?hackCode=HACK-XXXX&includeExpired=false
+    """
+    hack_code = request.args.get("hackCode")
+    include_expired = request.args.get("includeExpired", "false").lower() == "true"
+
+    if not hack_code:
+        return jsonify({"error": "hackCode is required"}), 400
+
+    hack = hackathons.find_one({"hackCode": hack_code}, {"_id": 0})
+    if not hack:
+        return jsonify({"error": "Hackathon not found"}), 404
+
+    announcements = hack.get("announcements", [])
+
+    # Filter out expired announcements unless explicitly requested
+    if not include_expired:
+        current_time = datetime.now()
+        active_announcements = []
+        for announcement in announcements:
+            try:
+                expiry_datetime = datetime.fromisoformat(announcement["expiryDate"].replace('Z', '+00:00'))
+                if expiry_datetime > current_time:
+                    active_announcements.append(announcement)
+            except (ValueError, KeyError):
+                # Skip announcements with invalid expiry dates
+                continue
+        announcements = active_announcements
+
+    # Sort by creation date (newest first)
+    announcements.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
+
+    return jsonify({
+        "hackCode": hack_code,
+        "announcements": announcements,
+        "count": len(announcements)
+    }), 200
+
+
 @app.route("/grading", methods=["POST"])
 @token_required
 def grading():
@@ -647,7 +755,51 @@ def grading():
         "score": submission["score"]
     }), 200
 
+@app.route("/eliminate", methods=["POST"])
+def eliminate():
+    hack_code = request.args.get("hackCode")
+    phase_id = request.args.get("phaseId")
+    data = request.get_json()
+    cutoff_score = data.get("cutoff_score")
 
+    if not hack_code or not phase_id or cutoff_score is None:
+        return jsonify({"error": "Missing hackCode, phaseId or cutoff_score"}), 400
 
+    hacks = mongo.db.hackathons
+    hackathon = hacks.find_one({"hackCode": hack_code})
+    if not hackathon:
+        return jsonify({"error": "Hackathon not found"}), 404
+
+    updated_teams = []
+    for team in hackathon.get("teams", []):
+        # find submission for given phase
+        submission = next(
+            (s for s in team.get("submissions", []) if str(s.get("phaseId")) == str(phase_id)),
+            None
+        )
+
+        score = None
+        if submission:
+            score = submission.get("score")
+
+        # Elimination check
+        if score is None or score < cutoff_score:
+            team["status"] = "inactive"
+        # else leave status unchanged
+
+        updated_teams.append(team)
+
+    # Save back
+    hacks.update_one(
+        {"hackCode": hack_code},
+        {"$set": {"teams": updated_teams}}
+    )
+
+    return jsonify({
+        "message": "Elimination done",
+        "phaseId": phase_id,
+        "cutoff_score": cutoff_score
+    }), 200
+    
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
