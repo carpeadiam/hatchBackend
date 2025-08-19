@@ -171,5 +171,17 @@ def get_all_hacks():
     # ^ exclude _id because it's not JSON serializable
     return jsonify(hacks)
 
+@app.route("/fetchhack", methods=["GET"])
+def fetch_hack():
+    hack_code = request.args.get("hackCode")  # expects ?hackCode=HACK-12345
+    if not hack_code:
+        return jsonify({"error": "hackCode is required"}), 400
+    
+    hack = hackathons.find_one({"hackCode": hack_code}, {"_id": 0})
+    if not hack:
+        return jsonify({"error": "Hackathon not found"}), 404
+    
+    return jsonify(hack)
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
