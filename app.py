@@ -8,6 +8,9 @@ from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
 from pymongo import MongoClient
+from email.message import EmailMessage
+import ssl
+import smtplib
 
 # --- Logging setup ---
 logging.basicConfig(
@@ -26,6 +29,10 @@ MONGO_URI = os.getenv("MONGO_URI")
 mongo_client = MongoClient(MONGO_URI)
 mongo_db = mongo_client["hackdb"]             # database name
 hackathons = mongo_db["hackathons"]           # collection name
+
+# Email credentials (use env vars ideally)
+EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS", "youremail@gmail.com")  # Replace with your Gmail address
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "your_app_password")   # Use app password (not your login password)
 
 # --- DB helpers ---
 def get_connection():
@@ -71,6 +78,32 @@ def token_required(f):
             return jsonify({"error": "Invalid token"}), 401
         return f(*args, **kwargs)
     return wrapper
+
+# --- Email functionality ---
+def send_added_to_team_email(email_to, creator_name="Your team leader"):
+    subject = "You're part of a team on Hatch!"
+    body = f"""
+    <html>
+    <body style="background-color: #ffffff; color: #2ecc71; font-family: Arial, sans-serif; text-align: center;">
+        <h1>🎉 Welcome to Hatch!</h1>
+        <p>You've been added to a team by <strong>{creator_name}</strong> for a Hackathon.</p>
+        <p style="font-size: 18px;">Get ready to innovate!</p>
+        <br><br>
+        <footer style="color: gray; font-size: 12px;">This is an automated message from Hatch.</footer>
+    </body>
+    </html>
+    """
+
+    em = EmailMessage()
+    em["From"] = EMAIL_ADDRESS
+    em["To"] = email_to
+    em["Subject"] = subject
+    em.set_content(body, subtype="html")
+
+    context = ssl.create_default_context()
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as smtp:
+        smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+        smtp.sendmail(EMAIL_ADDRESS, email_to, em.as_string())
 
 # --- Routes ---
 @app.route("/", methods=["GET"])
@@ -252,6 +285,13 @@ def register_team():
                 "hackathonsCreated": []
             })
         final_members.append(member)
+
+        # Send email notification
+        try:
+            creator_name = team_leader.get("name", "Your team leader")
+            send_added_to_team_email(email_to=email, creator_name=creator_name)
+        except Exception as e:
+            logger.error(f"❌ Email failed to {email}: {str(e)}")
 
     if not final_members or final_members[0].get("email") != leader_email:
         return jsonify({"error": "Team leader missing or invalid after validation"}), 400
