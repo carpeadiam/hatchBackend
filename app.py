@@ -758,23 +758,25 @@ def grading():
 @app.route("/eliminate", methods=["POST"])
 def eliminate():
     hack_code = request.args.get("hackCode")
-    phase_id = request.args.get("phaseId")
+    phase_id = request.args.get("phaseId", type=int)
     data = request.get_json()
     cutoff_score = data.get("cutoff_score")
 
-    if not hack_code or not phase_id or cutoff_score is None:
+    if not hack_code or phase_id is None or cutoff_score is None:
         return jsonify({"error": "hackCode, phaseId, and cutoff_score required"}), 400
 
-    hackathon = db["hackathons"].find_one({"hackCode": hack_code})
+    # fetch hackathon
+    hackathon = hackathons.find_one({"hackCode": hack_code})
     if not hackathon:
         return jsonify({"error": "Hackathon not found"}), 404
 
     updated_teams = []
-    for team in hackathon.get("teams", []):
-        # Find submission for this phase
+    for team in hackathon.get("registrations", []):
+        # check submissions list
+        submissions = team.get("submissions", [])
         submission = next(
-            (s for s in team.get("submissions", []) if str(s["phaseId"]) == str(phase_id)),
-            None,
+            (s for s in submissions if int(s.get("phaseId", -1)) == phase_id),
+            None
         )
 
         score = submission.get("score") if submission else None
@@ -782,10 +784,10 @@ def eliminate():
             team["status"] = "inactive"
             updated_teams.append(team["teamId"])
 
-    # Save updates back
-    db["hackathons"].update_one(
+    # update registrations back in DB
+    hackathons.update_one(
         {"hackCode": hack_code},
-        {"$set": {"teams": hackathon["teams"]}}
+        {"$set": {"registrations": hackathon["registrations"]}}
     )
 
     return jsonify({
@@ -793,7 +795,6 @@ def eliminate():
         "cutoff_score": cutoff_score,
         "eliminatedTeams": updated_teams
     }), 200
-
     
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
