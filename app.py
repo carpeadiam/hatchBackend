@@ -212,8 +212,11 @@ def register_team():
         return jsonify({"error": "Team leader email required"}), 400
 
     leader_doc = users_collection.find_one({"email": leader_email})
-    if leader_doc and hack_code in leader_doc.get("hackathonsRegistered", []):
+    if leader_doc and any(h["hackCode"] == hack_code for h in leader_doc.get("hackathonsRegistered", [])):
         return jsonify({"error": f"Leader {leader_email} already registered in this hackathon"}), 400
+
+    # Generate unique teamId (before looping so we can use it for each user)
+    team_id = str(uuid.uuid4())
 
     # check and update each member
     for member in all_members:
@@ -222,31 +225,36 @@ def register_team():
             continue
         user_doc = users_collection.find_one({"email": email})
         if user_doc:
-            if hack_code in user_doc.get("hackathonsRegistered", []):
+            if any(h["hackCode"] == hack_code for h in user_doc.get("hackathonsRegistered", [])):
                 # skip member already registered
                 if email == leader_email:
                     return jsonify({"error": f"Leader {email} already registered"}), 400
                 continue
             else:
-                # update registered list
+                # add hackathon with teamId
                 users_collection.update_one(
                     {"email": email},
-                    {"$addToSet": {"hackathonsRegistered": hack_code}}
+                    {"$addToSet": {
+                        "hackathonsRegistered": {
+                            "hackCode": hack_code,
+                            "teamId": team_id
+                        }
+                    }}
                 )
         else:
             # create new user
             users_collection.insert_one({
                 "email": email,
-                "hackathonsRegistered": [hack_code],
+                "hackathonsRegistered": [{
+                    "hackCode": hack_code,
+                    "teamId": team_id
+                }],
                 "hackathonsCreated": []
             })
         final_members.append(member)
 
     if not final_members or final_members[0].get("email") != leader_email:
         return jsonify({"error": "Team leader missing or invalid after validation"}), 400
-
-    # Generate unique teamId
-    team_id = str(uuid.uuid4())
 
     # Construct team registration object
     team_obj = {
@@ -267,6 +275,7 @@ def register_team():
         "message": "Team registered successfully",
         "team": team_obj
     }), 201
+
 
 
 if __name__ == "__main__":
