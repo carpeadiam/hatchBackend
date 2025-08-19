@@ -32,8 +32,8 @@ mongo_db = mongo_client["hackdb"]             # database name
 hackathons = mongo_db["hackathons"]           # collection name
 
 # Email credentials (use env vars ideally)
-EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS", "youremail@gmail.com")  # Replace with your Gmail address
-EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "your_app_password")   # Use app password (not your login password)
+EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS", "adi.profile1@gmail.com")  # Replace with your Gmail address
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "gwaryitmlyzygepr")   # Use app password (not your login password)
 
 # --- DB helpers ---
 def get_connection():
@@ -757,13 +757,18 @@ def grading():
 
 @app.route("/eliminate", methods=["POST"])
 def eliminate():
-    hack_code = request.args.get("hackCode")
-    phase_id = request.args.get("phaseId")
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
+    hack_code = data.get("hackCode")
+    phase_id = data.get("phaseId")
     cutoff_score = data.get("cutoff_score")
 
     if not hack_code or not phase_id or cutoff_score is None:
         return jsonify({"error": "Missing hackCode, phaseId or cutoff_score"}), 400
+
+    try:
+        cutoff_score = int(cutoff_score)
+    except ValueError:
+        return jsonify({"error": "cutoff_score must be an integer"}), 400
 
     hacks = mongo.db.hackathons
     hackathon = hacks.find_one({"hackCode": hack_code})
@@ -772,24 +777,22 @@ def eliminate():
 
     updated_teams = []
     for team in hackathon.get("teams", []):
-        # find submission for given phase
         submission = next(
             (s for s in team.get("submissions", []) if str(s.get("phaseId")) == str(phase_id)),
             None
         )
 
-        score = None
-        if submission:
-            score = submission.get("score")
+        score = submission.get("score") if submission else None
+        try:
+            score = int(score) if score is not None else None
+        except ValueError:
+            score = None
 
-        # Elimination check
         if score is None or score < cutoff_score:
             team["status"] = "inactive"
-        # else leave status unchanged
 
         updated_teams.append(team)
 
-    # Save back
     hacks.update_one(
         {"hackCode": hack_code},
         {"$set": {"teams": updated_teams}}
@@ -800,6 +803,7 @@ def eliminate():
         "phaseId": phase_id,
         "cutoff_score": cutoff_score
     }), 200
+
     
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
