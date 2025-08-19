@@ -277,6 +277,76 @@ def register_team():
     }), 201
 
 
+@app.route("/managehack", methods=["POST"])
+@token_required
+def manage_hack():
+    """
+    Manage a hackathon (only admins allowed).
+    Payload:
+    {
+        "hackCode": "HACK-XXXX",
+        "action": "update" | "view" | "add_admin" | "remove_admin",
+        "updateFields": {...},    # for action=update
+        "adminEmail": "..."       # for add/remove admin
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    hack_code = data.get("hackCode")
+    action = data.get("action")
+    user_email = request.user["email"]
+
+    if not hack_code or not action:
+        return jsonify({"error": "hackCode and action are required"}), 400
+
+    hack = hackathons.find_one({"hackCode": hack_code})
+    if not hack:
+        return jsonify({"error": "Hackathon not found"}), 404
+
+    # --- check if requester is admin ---
+    if user_email not in hack.get("admins", []):
+        return jsonify({"error": "Not authorized. Only admins can manage this hackathon."}), 403
+
+    # --- handle actions ---
+    if action == "view":
+        # show hackathon details including registrations
+        hack["_id"] = str(hack["_id"])  # make JSON safe
+        return jsonify(hack), 200
+
+    elif action == "update":
+        update_fields = data.get("updateFields", {})
+        if not update_fields:
+            return jsonify({"error": "updateFields is required for update action"}), 400
+        hackathons.update_one(
+            {"hackCode": hack_code},
+            {"$set": update_fields}
+        )
+        return jsonify({"message": "Hackathon updated successfully"}), 200
+
+    elif action == "add_admin":
+        new_admin = (data.get("adminEmail") or "").lower().strip()
+        if not new_admin:
+            return jsonify({"error": "adminEmail is required"}), 400
+        hackathons.update_one(
+            {"hackCode": hack_code},
+            {"$addToSet": {"admins": new_admin}}
+        )
+        return jsonify({"message": f"{new_admin} added as admin"}), 200
+
+    elif action == "remove_admin":
+        remove_admin = (data.get("adminEmail") or "").lower().strip()
+        if not remove_admin:
+            return jsonify({"error": "adminEmail is required"}), 400
+        if remove_admin == user_email:
+            return jsonify({"error": "You cannot remove yourself"}), 400
+        hackathons.update_one(
+            {"hackCode": hack_code},
+            {"$pull": {"admins": remove_admin}}
+        )
+        return jsonify({"message": f"{remove_admin} removed from admins"}), 200
+
+    else:
+        return jsonify({"error": f"Unknown action: {action}"}), 400
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
