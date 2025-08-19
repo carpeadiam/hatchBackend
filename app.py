@@ -757,51 +757,41 @@ def grading():
 
 @app.route("/eliminate", methods=["POST"])
 def eliminate():
-    data = request.get_json(silent=True) or {}
-    hack_code = data.get("hackCode")
-    phase_id = data.get("phaseId")
+    hack_code = request.args.get("hackCode")
+    phase_id = request.args.get("phaseId")
+    data = request.get_json()
     cutoff_score = data.get("cutoff_score")
 
     if not hack_code or not phase_id or cutoff_score is None:
-        return jsonify({"error": "Missing hackCode, phaseId or cutoff_score"}), 400
+        return jsonify({"error": "hackCode, phaseId, and cutoff_score required"}), 400
 
-    try:
-        cutoff_score = int(cutoff_score)
-    except ValueError:
-        return jsonify({"error": "cutoff_score must be an integer"}), 400
-
-    hacks = mongo.db.hackathons
-    hackathon = hacks.find_one({"hackCode": hack_code})
+    hackathon = db["hackathons"].find_one({"hackCode": hack_code})
     if not hackathon:
         return jsonify({"error": "Hackathon not found"}), 404
 
     updated_teams = []
     for team in hackathon.get("teams", []):
+        # Find submission for this phase
         submission = next(
-            (s for s in team.get("submissions", []) if str(s.get("phaseId")) == str(phase_id)),
-            None
+            (s for s in team.get("submissions", []) if str(s["phaseId"]) == str(phase_id)),
+            None,
         )
 
         score = submission.get("score") if submission else None
-        try:
-            score = int(score) if score is not None else None
-        except ValueError:
-            score = None
-
         if score is None or score < cutoff_score:
             team["status"] = "inactive"
+            updated_teams.append(team["teamId"])
 
-        updated_teams.append(team)
-
-    hacks.update_one(
+    # Save updates back
+    db["hackathons"].update_one(
         {"hackCode": hack_code},
-        {"$set": {"teams": updated_teams}}
+        {"$set": {"teams": hackathon["teams"]}}
     )
 
     return jsonify({
-        "message": "Elimination done",
-        "phaseId": phase_id,
-        "cutoff_score": cutoff_score
+        "message": "Elimination completed",
+        "cutoff_score": cutoff_score,
+        "eliminatedTeams": updated_teams
     }), 200
 
     
