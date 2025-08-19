@@ -770,19 +770,25 @@ def eliminate():
     if not hackathon:
         return jsonify({"error": "Hackathon not found"}), 404
 
-    updated_teams = []
+    updated_teams = {
+        "active": [],
+        "inactive": []
+    }
+
     for team in hackathon.get("registrations", []):
-        # check submissions list
         submissions = team.get("submissions", [])
         submission = next(
             (s for s in submissions if int(s.get("phaseId", -1)) == phase_id),
             None
         )
-
         score = submission.get("score") if submission else None
-        if score is None or score < cutoff_score:
+
+        if score is not None and score >= cutoff_score:
+            team["status"] = "active"
+            updated_teams["active"].append(team["teamId"])
+        else:
             team["status"] = "inactive"
-            updated_teams.append(team["teamId"])
+            updated_teams["inactive"].append(team["teamId"])
 
     # update registrations back in DB
     hackathons.update_one(
@@ -793,7 +799,7 @@ def eliminate():
     return jsonify({
         "message": "Elimination completed",
         "cutoff_score": cutoff_score,
-        "eliminatedTeams": updated_teams
+        "updatedTeams": updated_teams
     }), 200
     
 if __name__ == "__main__":
