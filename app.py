@@ -347,6 +347,60 @@ def manage_hack():
     else:
         return jsonify({"error": f"Unknown action: {action}"}), 400
 
+@app.route("/getTeamDetails", methods=["POST"])
+@token_required
+def get_team_details():
+    data = request.get_json(silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    hack_code = data.get("hackCode")
+
+    if not email or not hack_code:
+        return jsonify({"error": "email and hackCode are required"}), 400
+
+    # --- Step 1: Check usersDB for email ---
+    users_db = mongo_client["usersdb"]
+    users_collection = users_db["users"]
+
+    user_doc = users_collection.find_one({"email": email})
+    if not user_doc:
+        return jsonify({"error": "User not found"}), 404
+
+    # --- Step 2: Verify hackCode in hackathonsRegistered ---
+    reg_entry = next(
+        (h for h in user_doc.get("hackathonsRegistered", []) if h["hackCode"] == hack_code),
+        None
+    )
+    if not reg_entry:
+        return jsonify({"error": "User not registered in this hackathon"}), 400
+
+    team_id = reg_entry["teamId"]
+
+    # --- Step 3: Fetch hackathon from hackdb ---
+    hackathon_doc = hackathons.find_one({"hackCode": hack_code}, {"_id": 0})
+    if not hackathon_doc:
+        return jsonify({"error": "Hackathon not found"}), 404
+
+    # --- Step 4: Find team details inside hackathon.registrations ---
+    team_details = next(
+        (t for t in hackathon_doc.get("registrations", []) if t["teamId"] == team_id),
+        None
+    )
+    if not team_details:
+        return jsonify({"error": "Team details not found in hackathon"}), 404
+
+    return jsonify({
+        "message": "Team details fetched successfully",
+        "hackathon": {
+            "hackCode": hackathon_doc.get("hackCode"),
+            "eventName": hackathon_doc.get("eventName"),
+            "eventDescription": hackathon_doc.get("eventDescription"),
+            "eventStartDate": hackathon_doc.get("eventStartDate"),
+            "eventEndDate": hackathon_doc.get("eventEndDate"),
+        },
+        "team": team_details
+    }), 200
+
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
