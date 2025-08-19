@@ -364,7 +364,8 @@ def get_team_details():
     if not user_doc:
         return jsonify({
             "message": "User not found",
-            "registrationStatus": "no"
+            "registrationStatus": "no",
+            "team": None
         }), 200
 
     # --- Step 2: Verify hackCode in hackathonsRegistered ---
@@ -376,13 +377,17 @@ def get_team_details():
     if not reg_entry:
         return jsonify({
             "message": f"User {email} is not registered in hackathon {hack_code}",
-            "registrationStatus": "no"
+            "registrationStatus": "no",
+            "team": None
         }), 200
 
     team_id = reg_entry["teamId"]
 
     # --- Step 3: Fetch hackathon from hackdb ---
-    hackathon_doc = hackathons.find_one({"hackCode": hack_code}, {"_id": 0})
+    hack_db = mongo_client["hackdb"]
+    hackathons_collection = hack_db["hackathons"]
+
+    hackathon_doc = hackathons_collection.find_one({"hackCode": hack_code}, {"_id": 0})
     if not hackathon_doc:
         return jsonify({"error": "Hackathon not found"}), 404
 
