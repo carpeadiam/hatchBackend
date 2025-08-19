@@ -410,50 +410,81 @@ def get_team_details():
         "team": team_details
     }), 200
 
-@app.route('/leaveTeam', methods=['POST'])
+@app.route("/leaveTeam", methods=["POST"])
+@token_required
 def leave_team():
-    data = request.get_json()
-    hackCode = data.get("hackCode")
-    email = data.get("email")
+    data = request.get_json(silent=True) or {}
+    hack_code = data.get("hackCode")
+    email = (data.get("email") or "").strip().lower()
 
-    if not hackCode or not email:
+    if not hack_code or not email:
         return jsonify({"error": "hackCode and email are required"}), 400
 
-    # 1. Get user doc
-    user = users.find_one({"email": email})
-    if not user or "teamId" not in user:
-        return jsonify({"error": "User not in any team"}), 404
+    # --- Users DB ---
+    users_db = mongo_client["usersdb"]
+    users_collection = users_db["users"]
 
-    teamId = user["teamId"]
+    user_doc = users_collection.find_one({"email": email})
+    if not user_doc:
+        return jsonify({"error": f"User {email} not found"}), 404
 
-    # 2. Update hackathon doc -> remove user from team
-    hackathon = hackathons.find_one({"hackCode": hackCode, "teams.teamId": teamId})
-    if not hackathon:
-        return jsonify({"error": "Hackathon or team not found"}), 404
-
-    # Remove user from team members
-    hackathons.update_one(
-        {"hackCode": hackCode, "teams.teamId": teamId},
-        {"$pull": {"teams.$.members": {"email": email}}}
+    reg_entry = next(
+        (h for h in user_doc.get("hackathonsRegistered", []) if h["hackCode"] == hack_code),
+        None
     )
+    if not reg_entry:
+        return jsonify({"error": f"User {email} not registered in hackathon {hack_code}"}), 404
 
-    # 3. Remove teamId from user doc
-    users.update_one(
-        {"email": email},
-        {"$unset": {"teamId": ""}}
-    )
+    team_id = reg_entry["teamId"]
 
-    # 4. If team empty -> delete it
-    team = next((t for t in hackathon["teams"] if t["teamId"] == teamId), None)
-    if team:
-        updated_team = [m for m in team["members"] if m["email"] != email]
-        if not updated_team:  # team is empty now
+    # --- Hackathon DB ---
+    hack = hackathons.find_one({"hackCode": hack_code})
+    if not hack:
+        return jsonify({"error": "Hackathon not found"}), 404
+
+    team = next((t for t in hack.get("registrations", []) if t["teamId"] == team_id), None)
+    if not team:
+        return jsonify({"error": "Team not found"}), 404
+
+    # --- Remove user from team ---
+    if team.get("teamLeader", {}).get("email") == email:
+        # If leader leaves, promote first member if exists, else delete team
+        if team.get("teamMembers"):
+            new_leader = team["teamMembers"].pop(0)
+            team["teamLeader"] = new_leader
+        else:
+            # delete team entirely
             hackathons.update_one(
-                {"hackCode": hackCode},
-                {"$pull": {"teams": {"teamId": teamId}}}
+                {"hackCode": hack_code},
+                {"$pull": {"registrations": {"teamId": team_id}}}
+            )
+    else:
+        # Remove from teamMembers
+        team["teamMembers"] = [m for m in team.get("teamMembers", []) if m.get("email") != email]
+
+        # If no members + no leader → delete team
+        if not team.get("teamMembers") and not team.get("teamLeader"):
+            hackathons.update_one(
+                {"hackCode": hack_code},
+                {"$pull": {"registrations": {"teamId": team_id}}}
+            )
+        else:
+            # Otherwise, update team with new members
+            hackathons.update_one(
+                {"hackCode": hack_code, "registrations.teamId": team_id},
+                {"$set": {"registrations.$": team}}
             )
 
-    return jsonify({"message": f"{email} left team {teamId} successfully"}), 200
+    # --- Remove hackathon from user's record ---
+    users_collection.update_one(
+        {"email": email},
+        {"$pull": {"hackathonsRegistered": {"hackCode": hack_code}}}
+    )
+
+    return jsonify({
+        "message": f"{email} left team {team_id} in hackathon {hack_code} successfully"
+    }), 200
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
