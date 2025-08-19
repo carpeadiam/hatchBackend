@@ -557,6 +557,56 @@ def fetch_submissions():
         "submissions": team.get("submissions", [])
     }), 200
 
+@app.route("/grading", methods=["POST"])
+@token_required
+def grading():
+    data = request.get_json(silent=True) or {}
+    hack_code = data.get("hackCode")
+    team_id = data.get("teamId")
+    phase_id = data.get("phaseId")
+    score = data.get("score")
+
+    if not hack_code or not team_id or phase_id is None or score is None:
+        return jsonify({"error": "hackCode, teamId, phaseId, and score are required"}), 400
+
+    # Fetch hackathon
+    hack = hackathons.find_one({"hackCode": hack_code})
+    if not hack:
+        return jsonify({"error": "Hackathon not found"}), 404
+
+    # Find the team
+    team = next((t for t in hack.get("registrations", []) if t["teamId"] == team_id), None)
+    if not team:
+        return jsonify({"error": "Team not found"}), 404
+
+    # Ensure team has submissions
+    if "submissions" not in team or not team["submissions"]:
+        return jsonify({"error": "No submissions found for this team"}), 404
+
+    # Find the submission for given phaseId
+    submission = next((s for s in team["submissions"] if s["phaseId"] == phase_id), None)
+    if not submission:
+        return jsonify({"error": "Submission for this phase not found"}), 404
+
+    # Attach/Update score
+    if "score" not in submission:
+        submission["score"] = score
+    else:
+        submission["score"] = score  # overwrite (if you only want first-time set, remove this line)
+
+    # Save back
+    hackathons.update_one(
+        {"hackCode": hack_code, "registrations.teamId": team_id},
+        {"$set": {"registrations.$": team}}
+    )
+
+    return jsonify({
+        "message": "Score added successfully",
+        "teamId": team_id,
+        "phaseId": phase_id,
+        "score": submission["score"]
+    }), 200
+
 
 
 if __name__ == "__main__":
