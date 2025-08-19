@@ -31,8 +31,8 @@ mongo_db = mongo_client["hackdb"]             # database name
 hackathons = mongo_db["hackathons"]           # collection name
 
 # Email credentials (use env vars ideally)
-EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS", "youremail@gmail.com")  # Replace with your Gmail address
-EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "your_app_password")   # Use app password (not your login password)
+EMAIL_ADDRESS = os.getenv("EMAIL_ADDRESS", "adi.profile1@gmail.com")  # Replace with your Gmail address
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD", "gwaryitmlyzygepr")   # Use app password (not your login password)
 
 # --- DB helpers ---
 def get_connection():
