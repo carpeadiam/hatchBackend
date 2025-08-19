@@ -485,6 +485,79 @@ def leave_team():
         "message": f"{email} left team {team_id} in hackathon {hack_code} successfully"
     }), 200
 
+@app.route("/submissions", methods=["POST"])
+@token_required
+def submissions():
+    data = request.get_json(silent=True) or {}
+    hack_code = data.get("hackCode")
+    team_id = data.get("teamId")
+    phase_index = data.get("phaseIndex")
+    submission_content = data.get("submissions")
+
+    if not hack_code or not team_id or phase_index is None or not submission_content:
+        return jsonify({"error": "hackCode, teamId, phaseIndex and submissions are required"}), 400
+
+    # Fetch hackathon
+    hack = hackathons.find_one({"hackCode": hack_code})
+    if not hack:
+        return jsonify({"error": "Hackathon not found"}), 404
+
+    # Find the team inside registrations
+    team = next((t for t in hack.get("registrations", []) if t["teamId"] == team_id), None)
+    if not team:
+        return jsonify({"error": "Team not found"}), 404
+
+    # Ensure submissions array exists
+    if "submissions" not in team:
+        team["submissions"] = []
+
+    # Check if phaseIndex already exists
+    existing = next((s for s in team["submissions"] if s["phaseId"] == phase_index), None)
+    if existing:
+        existing["submissions"] = submission_content
+    else:
+        team["submissions"].append({
+            "phaseId": phase_index,
+            "submissions": submission_content
+        })
+
+    # Update team in DB
+    hackathons.update_one(
+        {"hackCode": hack_code, "registrations.teamId": team_id},
+        {"$set": {"registrations.$": team}}
+    )
+
+    return jsonify({
+        "message": "Submission saved successfully",
+        "teamId": team_id,
+        "phaseIndex": phase_index,
+        "submission": submission_content
+    }), 200
+
+
+@app.route("/fetchsubmissions", methods=["GET"])
+@token_required
+def fetch_submissions():
+    hack_code = request.args.get("hackCode")
+    team_id = request.args.get("teamId")
+
+    if not hack_code or not team_id:
+        return jsonify({"error": "hackCode and teamId are required"}), 400
+
+    hack = hackathons.find_one({"hackCode": hack_code}, {"_id": 0})
+    if not hack:
+        return jsonify({"error": "Hackathon not found"}), 404
+
+    team = next((t for t in hack.get("registrations", []) if t["teamId"] == team_id), None)
+    if not team:
+        return jsonify({"error": "Team not found"}), 404
+
+    return jsonify({
+        "teamId": team_id,
+        "submissions": team.get("submissions", [])
+    }), 200
+
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
