@@ -188,7 +188,7 @@ def fetch_hack():
 @token_required
 def register_team():
     data = request.get_json(silent=True) or {}
-    hack_code = data.get("hackathonCode")
+    hack_code = data.get("hackCode")
     if not hack_code:
         return jsonify({"error": "hackathonCode is required"}), 400
 
