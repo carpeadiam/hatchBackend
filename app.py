@@ -183,5 +183,91 @@ def fetch_hack():
     
     return jsonify(hack)
 
+
+@app.route("/registerteam", methods=["POST"])
+@token_required
+def register_team():
+    data = request.get_json(silent=True) or {}
+    hack_code = data.get("hackathonCode")
+    if not hack_code:
+        return jsonify({"error": "hackathonCode is required"}), 400
+
+    # Fetch hackathon
+    hack = hackathons.find_one({"hackCode": hack_code})
+    if not hack:
+        return jsonify({"error": "Hackathon not found"}), 404
+
+    # Users collection (separate DB)
+    users_db = mongo_client["usersdb"]
+    users_collection = users_db["users"]
+
+    team_leader = data.get("teamLeader", {})
+    team_members = data.get("teamMembers", [])
+    all_members = [team_leader] + team_members
+    final_members = []
+    
+    # validate leader first
+    leader_email = (team_leader.get("email") or "").lower().strip()
+    if not leader_email:
+        return jsonify({"error": "Team leader email required"}), 400
+
+    leader_doc = users_collection.find_one({"email": leader_email})
+    if leader_doc and hack_code in leader_doc.get("hackathonsRegistered", []):
+        return jsonify({"error": f"Leader {leader_email} already registered in this hackathon"}), 400
+
+    # check and update each member
+    for member in all_members:
+        email = (member.get("email") or "").lower().strip()
+        if not email:
+            continue
+        user_doc = users_collection.find_one({"email": email})
+        if user_doc:
+            if hack_code in user_doc.get("hackathonsRegistered", []):
+                # skip member already registered
+                if email == leader_email:
+                    return jsonify({"error": f"Leader {email} already registered"}), 400
+                continue
+            else:
+                # update registered list
+                users_collection.update_one(
+                    {"email": email},
+                    {"$addToSet": {"hackathonsRegistered": hack_code}}
+                )
+        else:
+            # create new user
+            users_collection.insert_one({
+                "email": email,
+                "hackathonsRegistered": [hack_code],
+                "hackathonsCreated": []
+            })
+        final_members.append(member)
+
+    if not final_members or final_members[0].get("email") != leader_email:
+        return jsonify({"error": "Team leader missing or invalid after validation"}), 400
+
+    # Generate unique teamId
+    team_id = str(uuid.uuid4())
+
+    # Construct team registration object
+    team_obj = {
+        "teamId": team_id,
+        "teamName": data.get("teamName"),
+        "teamLeader": final_members[0],
+        "teamMembers": final_members[1:],  # rest after leader
+        "paymentDetails": data.get("paymentDetails", {}),
+    }
+
+    # Insert into hackathon registrations
+    hackathons.update_one(
+        {"hackCode": hack_code},
+        {"$push": {"registrations": team_obj}}
+    )
+
+    return jsonify({
+        "message": "Team registered successfully",
+        "team": team_obj
+    }), 201
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
