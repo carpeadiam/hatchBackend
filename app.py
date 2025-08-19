@@ -410,5 +410,50 @@ def get_team_details():
         "team": team_details
     }), 200
 
+@app.route('/leaveTeam', methods=['POST'])
+def leave_team():
+    data = request.get_json()
+    hackCode = data.get("hackCode")
+    email = data.get("email")
+
+    if not hackCode or not email:
+        return jsonify({"error": "hackCode and email are required"}), 400
+
+    # 1. Get user doc
+    user = users.find_one({"email": email})
+    if not user or "teamId" not in user:
+        return jsonify({"error": "User not in any team"}), 404
+
+    teamId = user["teamId"]
+
+    # 2. Update hackathon doc -> remove user from team
+    hackathon = hackathons.find_one({"hackCode": hackCode, "teams.teamId": teamId})
+    if not hackathon:
+        return jsonify({"error": "Hackathon or team not found"}), 404
+
+    # Remove user from team members
+    hackathons.update_one(
+        {"hackCode": hackCode, "teams.teamId": teamId},
+        {"$pull": {"teams.$.members": {"email": email}}}
+    )
+
+    # 3. Remove teamId from user doc
+    users.update_one(
+        {"email": email},
+        {"$unset": {"teamId": ""}}
+    )
+
+    # 4. If team empty -> delete it
+    team = next((t for t in hackathon["teams"] if t["teamId"] == teamId), None)
+    if team:
+        updated_team = [m for m in team["members"] if m["email"] != email]
+        if not updated_team:  # team is empty now
+            hackathons.update_one(
+                {"hackCode": hackCode},
+                {"$pull": {"teams": {"teamId": teamId}}}
+            )
+
+    return jsonify({"message": f"{email} left team {teamId} successfully"}), 200
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
