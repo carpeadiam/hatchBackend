@@ -1176,7 +1176,6 @@ def get_results():
     }), 200
 
 @app.route("/check-plagiarism", methods=["POST"])
-@token_required
 def check_plagiarism():
     """Check a GitHub repository for plagiarism"""
     try:
