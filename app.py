@@ -11,7 +11,7 @@ from pymongo import MongoClient
 from email.message import EmailMessage
 import ssl
 import smtplib
-from datetime import datetime
+from datetime import datetime, timezone
 
 # --- Logging setup ---
 logging.basicConfig(
@@ -598,111 +598,74 @@ def fetch_submissions():
         "submissions": team.get("submissions", [])
     }), 200
 
-@app.route("/announcement", methods=["POST"])
-@token_required
+@app.route("/announcements", methods=["POST"])
 def create_announcement():
-    """
-    Create an announcement for a hackathon (admin only).
-    Payload:
-    {
-        "hackCode": "HACK-XXXX",
-        "title": "Announcement Title",
-        "content": "Announcement content...",
-        "expiryDate": "2025-08-25T23:59:59Z"  # ISO format
-    }
-    """
-    data = request.get_json(silent=True) or {}
+    data = request.json
     hack_code = data.get("hackCode")
-    title = data.get("title", "").strip()
-    content = data.get("content", "").strip()
-    expiry_date = data.get("expiryDate", "").strip()
-    user_email = request.user["email"]
+    title = data.get("title")
+    content = data.get("content")
+    expiry_date = data.get("expiryDate")
+    user_email = data.get("userEmail")
 
-    # Validation
     if not hack_code or not title or not content or not expiry_date:
-        return jsonify({"error": "hackCode, title, content, and expiryDate are required"}), 400
+        return jsonify({"error": "Missing required fields"}), 400
 
-    # Validate expiry date format
     try:
-        expiry_datetime = datetime.fromisoformat(expiry_date.replace('Z', '+00:00'))
-        if expiry_datetime <= datetime.now():
+        expiry_datetime = datetime.fromisoformat(expiry_date.replace("Z", "+00:00"))
+        if expiry_datetime <= datetime.now(timezone.utc):
             return jsonify({"error": "Expiry date must be in the future"}), 400
     except ValueError:
-        return jsonify({"error": "Invalid expiryDate format. Use ISO format (e.g., 2025-08-25T23:59:59Z)"}), 400
+        return jsonify({"error": "Invalid expiry date format"}), 400
 
-    # Fetch hackathon
-    hack = hackathons.find_one({"hackCode": hack_code})
-    if not hack:
-        return jsonify({"error": "Hackathon not found"}), 404
-
-    # Check if user is admin
-    if user_email not in hack.get("admins", []):
-        return jsonify({"error": "Not authorized. Only admins can create announcements."}), 403
-
-    # Create announcement object
     announcement = {
         "id": str(uuid.uuid4()),
         "title": title,
         "content": content,
         "createdBy": user_email,
-        "createdAt": datetime.now().isoformat() + "Z",
+        "createdAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "expiryDate": expiry_date
     }
 
-    # Add announcement to hackathon
-    hackathons.update_one(
+    result = db.hackathons.update_one(
         {"hackCode": hack_code},
         {"$push": {"announcements": announcement}}
     )
 
-    logger.info("Announcement created for hackathon %s by %s", hack_code, user_email)
+    if result.modified_count == 0:
+        return jsonify({"error": "Hackathon not found"}), 404
 
-    return jsonify({
-        "message": "Announcement created successfully",
-        "announcement": announcement
-    }), 201
+    return jsonify({"message": "Announcement created successfully", "announcement": announcement}), 201
 
 
 @app.route("/announcements", methods=["GET"])
 def get_announcements():
-    """
-    Get active announcements for a hackathon.
-    Query params: ?hackCode=HACK-XXXX&includeExpired=false
-    """
     hack_code = request.args.get("hackCode")
     include_expired = request.args.get("includeExpired", "false").lower() == "true"
 
     if not hack_code:
         return jsonify({"error": "hackCode is required"}), 400
 
-    hack = hackathons.find_one({"hackCode": hack_code}, {"_id": 0})
-    if not hack:
+    hackathon = db.hackathons.find_one({"hackCode": hack_code}, {"announcements": 1, "_id": 0})
+    if not hackathon:
         return jsonify({"error": "Hackathon not found"}), 404
 
-    announcements = hack.get("announcements", [])
+    announcements = hackathon.get("announcements", [])
 
-    # Filter out expired announcements unless explicitly requested
     if not include_expired:
-        current_time = datetime.now()
+        current_time = datetime.now(timezone.utc)
         active_announcements = []
         for announcement in announcements:
             try:
-                expiry_datetime = datetime.fromisoformat(announcement["expiryDate"].replace('Z', '+00:00'))
+                expiry_datetime = datetime.fromisoformat(
+                    announcement["expiryDate"].replace("Z", "+00:00")
+                )
                 if expiry_datetime > current_time:
                     active_announcements.append(announcement)
             except (ValueError, KeyError):
-                # Skip announcements with invalid expiry dates
                 continue
         announcements = active_announcements
 
-    # Sort by creation date (newest first)
-    announcements.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
-
-    return jsonify({
-        "hackCode": hack_code,
-        "announcements": announcements,
-        "count": len(announcements)
-    }), 200
+    return jsonify({"announcements": announcements}), 200
 
 
 @app.route("/grading", methods=["POST"])
