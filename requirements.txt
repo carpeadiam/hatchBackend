@@ -4,3 +4,6 @@ werkzeug
 PyJWT
 gunicorn
 Pymongo
+requests
+numpy
+datasketch
