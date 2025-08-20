@@ -12,6 +12,7 @@ from email.message import EmailMessage
 import ssl
 import smtplib
 from datetime import datetime, timezone
+from plagiarism_checker import PlagiarismChecker, Config as PlagiarismConfig
 
 # --- Logging setup ---
 logging.basicConfig(
@@ -859,6 +860,48 @@ def get_results():
         "hackCode": hack_code,
         "results": hack["results"]
     }), 200
+
+@app.route("/check-plagiarism", methods=["POST"])
+@token_required
+def check_plagiarism():
+    """Check a GitHub repository for plagiarism"""
+    try:
+        data = request.get_json(silent=True) or {}
+        repo_url = data.get('repository_url')
+        
+        if not repo_url:
+            return jsonify({"error": "repository_url is required"}), 400
+        
+        # Validate GitHub URL
+        if 'github.com' not in repo_url:
+            return jsonify({"error": "Only GitHub repositories are supported"}), 400
+        
+        # Initialize plagiarism checker with your GitHub token
+        github_token = os.getenv('GITHUB_TOKEN', '')  # Use your existing token
+        checker = PlagiarismChecker(github_token)
+        
+        # Run plagiarism check
+        result = checker.check_repository(repo_url)
+        
+        return jsonify({
+            "success": True,
+            "data": result
+        })
+        
+    except ValueError as e:
+        return jsonify({
+            "success": False,
+            "error": "Invalid repository URL",
+            "message": str(e)
+        }), 400
+        
+    except Exception as e:
+        logger.error(f"Plagiarism check failed: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": "Analysis failed",
+            "message": str(e)
+        }), 500
     
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
