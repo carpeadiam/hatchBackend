@@ -764,6 +764,101 @@ def eliminate():
         "cutoff_score": cutoff_score,
         "updatedTeams": updated_teams
     }), 200
+@app.route("/publishresults", methods=["POST"])
+@token_required
+def publish_results():
+    """
+    Publish results for a hackathon (admin only).
+    Expected JSON payload from frontend:
+    {
+        "eventName": "trial123 nice",
+        "hackCode": "HACK-D5AE6861",
+        "leaderboard": [
+            {
+                "teamId": "1cd0d454-3612-4c9b-9a43-b90b267db0dd",
+                "teamName": "rv",
+                "memberCount": 1,
+                "phaseScores": [{...}, {...}],
+                "totalScore": 13,
+                "rank": 1
+            },
+            ...
+        ],
+        "publishedAt": "2025-08-20T10:44:03.547Z",
+        "totalTeams": 3
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    user_email = request.user["email"]
+    
+    hack_code = data.get("hackCode")
+    if not hack_code:
+        return jsonify({"error": "hackCode is required"}), 400
+    
+    # Verify user is admin of this hackathon
+    hack = hackathons.find_one({"hackCode": hack_code})
+    if not hack:
+        return jsonify({"error": "Hackathon not found"}), 404
+    
+    if user_email not in hack.get("admins", []):
+        return jsonify({"error": "Not authorized. Only admins can publish results."}), 403
+    
+    # Prepare results data with the exact structure from frontend
+    results = {
+        "eventName": data.get("eventName", ""),
+        "hackCode": hack_code,
+        "leaderboard": data.get("leaderboard", []),
+        "totalTeams": data.get("totalTeams", 0),
+        "publishedAt": data.get("publishedAt", datetime.now().isoformat() + "Z"),
+        "publishedBy": user_email  # Adding who published the results
+    }
+    
+    # Update the hackathon document in hackdb.hackathons collection
+    try:
+        result = hackathons.update_one(
+            {"hackCode": hack_code},
+            {"$set": {"results": results}}
+        )
+        
+        if result.modified_count == 0:
+            return jsonify({"error": "Failed to update hackathon with results"}), 500
+        
+        logger.info(f"Results published for hackathon {hack_code} by {user_email}")
+        
+        return jsonify({
+            "message": "Results published successfully",
+            "results": results
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error publishing results: {str(e)}")
+        return jsonify({"error": "Failed to publish results", "details": str(e)}), 500
+
+
+@app.route("/results", methods=["GET"])
+def get_results():
+    """
+    Get published results for a hackathon.
+    Query params: ?hackCode=HACK-XXXX
+    """
+    hack_code = request.args.get("hackCode")
+    
+    if not hack_code:
+        return jsonify({"error": "hackCode is required"}), 400
+    
+    # Find the hackathon in hackdb.hackathons collection
+    hack = hackathons.find_one({"hackCode": hack_code}, {"_id": 0})
+    if not hack:
+        return jsonify({"error": "Hackathon not found"}), 404
+    
+    # Check if results exist
+    if "results" not in hack:
+        return jsonify({"error": "Results not published yet for this hackathon"}), 404
+    
+    return jsonify({
+        "hackCode": hack_code,
+        "results": hack["results"]
+    }), 200
     
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
