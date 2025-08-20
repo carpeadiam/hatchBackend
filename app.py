@@ -626,7 +626,7 @@ def create_announcement():
         "expiryDate": expiry_date
     }
 
-    result = db.hackathons.update_one(
+    result = hackathons.update_one(
         {"hackCode": hack_code},
         {"$push": {"announcements": announcement}}
     )
@@ -645,7 +645,7 @@ def get_announcements():
     if not hack_code:
         return jsonify({"error": "hackCode is required"}), 400
 
-    hackathon = db.hackathons.find_one({"hackCode": hack_code}, {"announcements": 1, "_id": 0})
+    hackathon = hackathons.find_one({"hackCode": hack_code}, {"announcements": 1, "_id": 0})
     if not hackathon:
         return jsonify({"error": "Hackathon not found"}), 404
 
