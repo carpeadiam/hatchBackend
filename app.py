@@ -765,11 +765,13 @@ def eliminate():
         "cutoff_score": cutoff_score,
         "updatedTeams": updated_teams
     }), 200
+# Enhanced /publishresults endpoint - Replace the existing one in your app.py
+
 @app.route("/publishresults", methods=["POST"])
 @token_required
 def publish_results():
     """
-    Publish results for a hackathon (admin only).
+    Publish results for a hackathon and automatically send certificates to all participants.
     Expected JSON payload from frontend:
     {
         "eventName": "trial123 nice",
@@ -811,7 +813,7 @@ def publish_results():
         "leaderboard": data.get("leaderboard", []),
         "totalTeams": data.get("totalTeams", 0),
         "publishedAt": data.get("publishedAt", datetime.now().isoformat() + "Z"),
-        "publishedBy": user_email  # Adding who published the results
+        "publishedBy": user_email
     }
     
     # Update the hackathon document in hackdb.hackathons collection
@@ -826,14 +828,326 @@ def publish_results():
         
         logger.info(f"Results published for hackathon {hack_code} by {user_email}")
         
+        # 🎯 NEW: Automatically send certificates to all participants
+        certificate_status = send_certificates_to_all_participants(hack_code, results["leaderboard"], hack)
+        
         return jsonify({
             "message": "Results published successfully",
-            "results": results
+            "results": results,
+            "certificateStatus": certificate_status
         }), 200
         
     except Exception as e:
         logger.error(f"Error publishing results: {str(e)}")
         return jsonify({"error": "Failed to publish results", "details": str(e)}), 500
+
+
+def send_certificates_to_all_participants(hack_code, leaderboard, hackathon):
+    """
+    Send certificates to all participants based on their ranking
+    """
+    logger.info(f"Starting certificate distribution for hackathon {hack_code}")
+    
+    certificate_status = {
+        "total_teams": len(leaderboard),
+        "certificates_sent": 0,
+        "failed_sends": 0,
+        "details": []
+    }
+    
+    event_name = hackathon.get("eventName", "Hackathon Event")
+    organizers = hackathon.get("organisers", [])
+    organizer_name = organizers[0].get("name", "Event Organizer") if organizers else "Event Organizer"
+    
+    for team_result in leaderboard:
+        team_id = team_result.get("teamId")
+        rank = team_result.get("rank", 999)
+        team_name = team_result.get("teamName", "Team")
+        
+        try:
+            # Find the actual team details in registrations
+            team_details = None
+            for registration in hackathon.get("registrations", []):
+                if registration.get("teamId") == team_id:
+                    team_details = registration
+                    break
+            
+            if not team_details:
+                logger.warning(f"Team details not found for teamId: {team_id}")
+                certificate_status["failed_sends"] += 1
+                certificate_status["details"].append({
+                    "teamId": team_id,
+                    "teamName": team_name,
+                    "status": "failed",
+                    "reason": "Team details not found"
+                })
+                continue
+            
+            # Send certificate to team leader
+            team_leader = team_details.get("teamLeader", {})
+            participant_email = team_leader.get("email", "")
+            participant_name = team_leader.get("name", "Participant")
+            
+            if not participant_email:
+                logger.warning(f"No email found for team leader of team {team_name}")
+                certificate_status["failed_sends"] += 1
+                certificate_status["details"].append({
+                    "teamId": team_id,
+                    "teamName": team_name,
+                    "status": "failed",
+                    "reason": "No email address found"
+                })
+                continue
+            
+            # Generate certificate URL
+            certificate_url = f"{request.url_root}certificate?hackCode={hack_code}&teamId={team_id}&rank={rank}"
+            
+            # Determine achievement text based on rank
+            if rank == 1:
+                achievement = "🥇 First Place Winner"
+                subject_prefix = "🏆 WINNER!"
+            elif rank == 2:
+                achievement = "🥈 Second Place Winner"
+                subject_prefix = "🥈 RUNNER-UP!"
+            elif rank == 3:
+                achievement = "🥉 Third Place Winner"
+                subject_prefix = "🥉 THIRD PLACE!"
+            else:
+                achievement = "Certificate of Participation"
+                subject_prefix = "🎉 PARTICIPANT!"
+            
+            # Send email with certificate
+            success = send_certificate_email(
+                participant_email, 
+                participant_name, 
+                event_name, 
+                certificate_url, 
+                achievement,
+                subject_prefix,
+                organizer_name
+            )
+            
+            if success:
+                certificate_status["certificates_sent"] += 1
+                certificate_status["details"].append({
+                    "teamId": team_id,
+                    "teamName": team_name,
+                    "participantName": participant_name,
+                    "participantEmail": participant_email,
+                    "rank": rank,
+                    "achievement": achievement,
+                    "status": "sent",
+                    "certificate_url": certificate_url
+                })
+                logger.info(f"Certificate sent to {participant_email} for team {team_name} (Rank: {rank})")
+            else:
+                certificate_status["failed_sends"] += 1
+                certificate_status["details"].append({
+                    "teamId": team_id,
+                    "teamName": team_name,
+                    "participantName": participant_name,
+                    "participantEmail": participant_email,
+                    "status": "failed",
+                    "reason": "Email sending failed"
+                })
+                
+        except Exception as e:
+            logger.error(f"Error sending certificate to team {team_id}: {str(e)}")
+            certificate_status["failed_sends"] += 1
+            certificate_status["details"].append({
+                "teamId": team_id,
+                "teamName": team_name,
+                "status": "failed",
+                "reason": f"Exception: {str(e)}"
+            })
+    
+    logger.info(f"Certificate distribution completed. Sent: {certificate_status['certificates_sent']}, Failed: {certificate_status['failed_sends']}")
+    return certificate_status
+
+
+def send_certificate_email(participant_email, participant_name, event_name, certificate_url, achievement, subject_prefix, organizer_name):
+    """
+    Send individual certificate email
+    """
+    try:
+        subject = f"{subject_prefix} Your Certificate from {event_name}"
+        
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; border-radius: 15px; text-align: center; margin-bottom: 30px;">
+                <h1 style="color: white; font-size: 2.5rem; margin: 0; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);">
+                    🎉 Congratulations!
+                </h1>
+                <p style="color: white; font-size: 1.2rem; margin: 10px 0 0 0; opacity: 0.9;">
+                    {event_name} Results
+                </p>
+            </div>
+            
+            <div style="background: #f8f9fa; padding: 25px; border-radius: 10px; margin-bottom: 25px;">
+                <p style="font-size: 1.1rem; margin: 0 0 15px 0;">Dear <strong>{participant_name}</strong>,</p>
+                <p style="font-size: 1rem; margin: 0 0 15px 0;">
+                    The results for <strong>{event_name}</strong> have been published, and we're excited to share your achievement!
+                </p>
+                <div style="background: white; padding: 20px; border-radius: 8px; border-left: 5px solid #27ae60;">
+                    <p style="margin: 0; font-size: 1.1rem; color: #27ae60; font-weight: bold;">
+                        🏆 Your Achievement: {achievement}
+                    </p>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin: 30px 0;">
+                <p style="font-size: 1rem; margin-bottom: 20px;">Your official certificate is ready for download:</p>
+                <a href="{certificate_url}" 
+                   style="background: linear-gradient(45deg, #667eea, #764ba2); 
+                          color: white; 
+                          padding: 15px 30px; 
+                          text-decoration: none; 
+                          border-radius: 25px; 
+                          font-weight: bold;
+                          display: inline-block;
+                          font-size: 1.1rem;
+                          box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);">
+                    📜 View & Download Your Certificate
+                </a>
+            </div>
+            
+            <div style="background: #e8f4fd; padding: 20px; border-radius: 8px; margin: 25px 0;">
+                <h3 style="color: #2980b9; margin: 0 0 10px 0;">📋 What you can do:</h3>
+                <ul style="margin: 0; padding-left: 20px; color: #2c3e50;">
+                    <li>View your personalized certificate online</li>
+                    <li>Download it as a high-quality PDF</li>
+                    <li>Share it on social media and LinkedIn</li>
+                    <li>Add it to your professional portfolio</li>
+                </ul>
+            </div>
+            
+            <div style="margin: 30px 0; text-align: center;">
+                <p style="font-size: 1rem; margin-bottom: 10px;">
+                    Thank you for your participation and congratulations once again! 🎊
+                </p>
+                <p style="font-size: 0.9rem; color: #7f8c8d; margin: 0;">
+                    Best regards,<br>
+                    <strong>{organizer_name}</strong><br>
+                    {event_name} Organizing Team
+                </p>
+            </div>
+            
+            <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+            <div style="text-align: center;">
+                <p style="color: #7f8c8d; font-size: 0.8rem; margin: 0;">
+                    This is an automated message sent upon publishing of hackathon results.<br>
+                    If you have any questions, please contact the organizing team.
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+        
+        em = EmailMessage()
+        em["From"] = EMAIL_ADDRESS
+        em["To"] = participant_email
+        em["Subject"] = subject
+        em.set_content(body, subtype="html")
+        
+        context = ssl.create_default_context()
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as smtp:
+            smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+            smtp.sendmail(EMAIL_ADDRESS, participant_email, em.as_string())
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Failed to send certificate email to {participant_email}: {str(e)}")
+        return False
+
+
+# Keep the existing certificate generation endpoint as well
+@app.route("/certificate", methods=["GET"])
+def generate_certificate():
+    """
+    Generate certificate for a participant
+    URL: /certificate?hackCode=HACK-D5AE6861&teamId=abc123&rank=1
+    """
+    hack_code = request.args.get("hackCode")
+    team_id = request.args.get("teamId")
+    rank = request.args.get("rank", "Participant")
+    
+    if not hack_code or not team_id:
+        return jsonify({"error": "hackCode and teamId are required"}), 400
+    
+    try:
+        # Fetch hackathon details
+        hackathon = hackathons.find_one({"hackCode": hack_code})
+        if not hackathon:
+            return jsonify({"error": "Hackathon not found"}), 404
+        
+        # Find the specific team
+        team = None
+        for registration in hackathon.get("registrations", []):
+            if registration.get("teamId") == team_id:
+                team = registration
+                break
+        
+        if not team:
+            return jsonify({"error": "Team not found"}), 404
+        
+        # Get participant details (team leader as primary recipient)
+        participant_name = team.get("teamLeader", {}).get("name", "Participant")
+        participant_email = team.get("teamLeader", {}).get("email", "")
+        team_name = team.get("teamName", "Team")
+        
+        # Get hackathon details
+        event_name = hackathon.get("eventName", "Hackathon Event")
+        organizers = hackathon.get("organisers", [])
+        organizer_name = organizers[0].get("name", "Event Organizer") if organizers else "Event Organizer"
+        
+        # Determine achievement based on rank
+        try:
+            rank_int = int(rank)
+            if rank_int == 1:
+                achievement = "🥇 First Place Winner"
+            elif rank_int == 2:
+                achievement = "🥈 Second Place Winner"  
+            elif rank_int == 3:
+                achievement = "🥉 Third Place Winner"
+            else:
+                achievement = "Certificate of Participation"
+        except:
+            achievement = "Certificate of Participation"
+        
+        # Get current date
+        current_date = datetime.now().strftime("%B %d, %Y")
+        
+        # Prepare template data
+        template_data = {
+            'participant_name': participant_name,
+            'team_name': team_name,
+            'event_name': event_name,
+            'achievement': achievement,
+            'organizer_name': organizer_name,
+            'certificate_date': current_date,
+            'hack_code': hack_code
+        }
+        
+        # Read and render the HTML template
+        try:
+            with open('certificate.html', 'r', encoding='utf-8') as file:
+                html_content = file.read()
+                
+            # Replace template placeholders with actual data
+            for key, value in template_data.items():
+                placeholder = f"{{{{{key}}}}}"
+                html_content = html_content.replace(placeholder, str(value))
+                
+            return html_content
+            
+        except FileNotFoundError:
+            return jsonify({"error": "Certificate template not found"}), 500
+            
+    except Exception as e:
+        logger.error(f"Error generating certificate: {str(e)}")
+        return jsonify({"error": "Failed to generate certificate", "details": str(e)}), 500
 
 
 @app.route("/results", methods=["GET"])
@@ -862,6 +1176,7 @@ def get_results():
     }), 200
 
 @app.route("/check-plagiarism", methods=["POST"])
+@token_required
 def check_plagiarism():
     """Check a GitHub repository for plagiarism"""
     try:
@@ -901,6 +1216,8 @@ def check_plagiarism():
             "error": "Analysis failed",
             "message": str(e)
         }), 500
+    
+
     
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
