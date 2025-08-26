@@ -1064,7 +1064,7 @@ def send_certificate_email(participant_email, participant_name, event_name, cert
 
 # Keep the existing certificate generation endpoint as well
 @app.route("/certificate", methods=["GET"])
-def generate_certificate_alt():
+def generate_certificate():
     """
     Alternative approach using templates folder
     Place the certificate.html template in your Flask templates/ directory
