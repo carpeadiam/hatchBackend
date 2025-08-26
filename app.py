@@ -3,7 +3,7 @@ import psycopg2
 import jwt
 import uuid
 import logging
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 from psycopg2.extras import RealDictCursor
 from werkzeug.security import generate_password_hash, check_password_hash
 from functools import wraps
@@ -1094,7 +1094,6 @@ def generate_certificate():
         
         # Get participant details (team leader as primary recipient)
         participant_name = team.get("teamLeader", {}).get("name", "Participant")
-        participant_email = team.get("teamLeader", {}).get("email", "")
         team_name = team.get("teamName", "Team")
         
         # Get hackathon details
@@ -1106,11 +1105,11 @@ def generate_certificate():
         try:
             rank_int = int(rank)
             if rank_int == 1:
-                achievement = "🥇 First Place Winner"
+                achievement = "First Place Winner"
             elif rank_int == 2:
-                achievement = "🥈 Second Place Winner"  
+                achievement = "Second Place Winner"  
             elif rank_int == 3:
-                achievement = "🥉 Third Place Winner"
+                achievement = "Third Place Winner"
             else:
                 achievement = "Certificate of Participation"
         except:
@@ -1130,17 +1129,13 @@ def generate_certificate():
             'hack_code': hack_code
         }
         
-        # Read and render the HTML template
+        # Read and render the HTML template using Jinja2
         try:
             with open('certificate.html', 'r', encoding='utf-8') as file:
-                html_content = file.read()
+                template_content = file.read()
                 
-            # Replace template placeholders with actual data
-            for key, value in template_data.items():
-                placeholder = f"{{{{{key}}}}}"
-                html_content = html_content.replace(placeholder, str(value))
-                
-            return html_content
+            # Use Flask's render_template_string with Jinja2 templating
+            return render_template_string(template_content, **template_data)
             
         except FileNotFoundError:
             return jsonify({"error": "Certificate template not found"}), 500
@@ -1148,7 +1143,6 @@ def generate_certificate():
     except Exception as e:
         logger.error(f"Error generating certificate: {str(e)}")
         return jsonify({"error": "Failed to generate certificate", "details": str(e)}), 500
-
 
 @app.route("/results", methods=["GET"])
 def get_results():
