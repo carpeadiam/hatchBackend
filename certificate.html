@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Certificate - {{participant_name}}</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -13,277 +14,542 @@
         }
 
         body {
-            font-family: 'Georgia', 'Times New Roman', serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
             min-height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
             padding: 20px;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                radial-gradient(circle at 20% 20%, rgba(120, 119, 198, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 80% 80%, rgba(255, 100, 100, 0.1) 0%, transparent 50%),
+                radial-gradient(circle at 40% 70%, rgba(100, 255, 200, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: -1;
         }
 
         .container {
-            max-width: 900px;
+            max-width: 1200px;
             width: 100%;
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+            background: rgba(255, 255, 255, 0.98);
+            border-radius: 24px;
+            box-shadow: 
+                0 25px 50px rgba(0, 0, 0, 0.25),
+                0 0 0 1px rgba(255, 255, 255, 0.1),
+                inset 0 1px 0 rgba(255, 255, 255, 0.9);
             overflow: hidden;
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
         }
 
         .certificate {
             width: 100%;
-            min-height: 600px;
+            aspect-ratio: 297/210;
             position: relative;
             background: 
-                linear-gradient(45deg, transparent 45%, rgba(102, 126, 234, 0.05) 47%, rgba(102, 126, 234, 0.05) 53%, transparent 55%),
-                linear-gradient(-45deg, transparent 45%, rgba(118, 75, 162, 0.05) 47%, rgba(118, 75, 162, 0.05) 53%, transparent 55%);
-            background-size: 30px 30px;
-            border: 15px solid #2c3e50;
-            padding: 40px;
+                linear-gradient(135deg, #ffffff 0%, #f8fafc 100%),
+                repeating-linear-gradient(
+                    45deg,
+                    transparent,
+                    transparent 2px,
+                    rgba(148, 163, 184, 0.03) 2px,
+                    rgba(148, 163, 184, 0.03) 4px
+                );
+            padding: 60px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            overflow: hidden;
         }
 
         .certificate::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: 
+                linear-gradient(45deg, transparent 48%, rgba(59, 130, 246, 0.1) 49%, rgba(59, 130, 246, 0.1) 51%, transparent 52%),
+                linear-gradient(-45deg, transparent 48%, rgba(168, 85, 247, 0.1) 49%, rgba(168, 85, 247, 0.1) 51%, transparent 52%);
+            background-size: 60px 60px;
+            pointer-events: none;
+            opacity: 0.4;
+        }
+
+        .certificate::after {
             content: '';
             position: absolute;
             top: 20px;
             left: 20px;
             right: 20px;
             bottom: 20px;
-            border: 3px solid #34495e;
-            border-radius: 10px;
+            border: 3px solid;
+            border-image: linear-gradient(45deg, #3b82f6, #8b5cf6, #ef4444, #10b981) 1;
             pointer-events: none;
+            border-radius: 12px;
         }
 
-        .certificate-header {
+        .glow-border {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            bottom: 10px;
+            border: 2px solid transparent;
+            border-radius: 16px;
+            background: linear-gradient(45deg, #3b82f6, #8b5cf6, #ef4444, #10b981, #3b82f6);
+            background-size: 400% 400%;
+            animation: gradientShift 4s ease-in-out infinite;
+            mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            mask-composite: xor;
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            padding: 2px;
+        }
+
+        @keyframes gradientShift {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+
+        .header {
             text-align: center;
             margin-bottom: 30px;
             position: relative;
-            z-index: 2;
+            z-index: 3;
         }
 
         .certificate-title {
-            font-size: 3rem;
-            font-weight: bold;
-            color: #2c3e50;
-            text-transform: uppercase;
-            letter-spacing: 4px;
+            font-family: 'Orbitron', monospace;
+            font-size: 4rem;
+            font-weight: 900;
+            background: linear-gradient(135deg, #1e293b 0%, #3b82f6 50%, #8b5cf6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: 8px;
             margin-bottom: 10px;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.1);
+            text-transform: uppercase;
+            position: relative;
+            text-shadow: 0 0 30px rgba(59, 130, 246, 0.3);
+        }
+
+        .certificate-title::after {
+            content: '';
+            position: absolute;
+            bottom: -10px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 200px;
+            height: 4px;
+            background: linear-gradient(90deg, transparent, #3b82f6, transparent);
+            border-radius: 2px;
         }
 
         .certificate-subtitle {
             font-size: 1.2rem;
-            color: #7f8c8d;
-            font-style: italic;
+            color: #64748b;
+            font-weight: 500;
             text-transform: uppercase;
-            letter-spacing: 2px;
+            letter-spacing: 6px;
+            margin-top: 20px;
         }
 
-        .certificate-body {
+        .content {
             text-align: center;
-            margin: 40px 0;
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            margin: 20px 0;
             position: relative;
-            z-index: 2;
+            z-index: 3;
         }
 
-        .awarded-text {
-            font-size: 1.5rem;
-            color: #34495e;
-            margin-bottom: 20px;
+        .presented-to {
+            font-size: 1.4rem;
+            color: #475569;
+            margin-bottom: 25px;
+            font-weight: 400;
             font-style: italic;
+            opacity: 0.9;
         }
 
         .participant-name {
+            font-family: 'Orbitron', monospace;
             font-size: 3.5rem;
-            font-weight: bold;
-            color: #2980b9;
-            margin: 20px 0;
+            font-weight: 700;
+            background: linear-gradient(135deg, #0f172a 0%, #1e40af 50%, #7c3aed 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin: 30px 0;
             text-transform: uppercase;
             letter-spacing: 2px;
-            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.1);
-            border-bottom: 3px solid #3498db;
+            position: relative;
             display: inline-block;
-            padding-bottom: 10px;
+        }
+
+        .participant-name::before {
+            content: '';
+            position: absolute;
+            bottom: -15px;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, #3b82f6, #8b5cf6, #3b82f6, transparent);
+            border-radius: 2px;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scaleX(1); }
+            50% { opacity: 0.7; transform: scaleX(0.95); }
         }
 
         .team-info {
             font-size: 1.2rem;
-            color: #7f8c8d;
-            margin: 15px 0;
-            font-style: italic;
+            color: #64748b;
+            margin: 25px 0;
+            font-weight: 500;
+            background: rgba(59, 130, 246, 0.05);
+            padding: 15px 30px;
+            border-radius: 50px;
+            border: 1px solid rgba(59, 130, 246, 0.1);
+            display: inline-block;
         }
 
-        .achievement-text {
-            font-size: 1.3rem;
-            color: #2c3e50;
-            margin: 30px 0;
-            line-height: 1.6;
-        }
-
-        .hackathon-name {
-            font-size: 2.2rem;
-            font-weight: bold;
-            color: #8e44ad;
-            margin: 20px 0;
+        .team-name {
+            color: #1e40af;
+            font-weight: 700;
             text-transform: uppercase;
             letter-spacing: 1px;
         }
 
-        .prize-level {
-            font-size: 2rem;
-            font-weight: bold;
-            color: #e74c3c;
-            margin: 15px 0;
-            text-transform: uppercase;
-            background: linear-gradient(45deg, #f39c12, #e74c3c);
+        .achievement-text {
+            font-size: 1.3rem;
+            color: #475569;
+            margin: 30px 0 20px;
+            font-weight: 500;
+        }
+
+        .achievement {
+            font-family: 'Orbitron', monospace;
+            font-size: 2.8rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #dc2626 0%, #ea580c 50%, #f59e0b 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
+            margin: 20px 0;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            text-shadow: 0 0 30px rgba(220, 38, 38, 0.3);
+            position: relative;
         }
 
-        .certificate-footer {
+        .achievement::before {
+            content: '🏆';
+            position: absolute;
+            left: -60px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 2rem;
+            animation: bounce 2s ease-in-out infinite;
+        }
+
+        .achievement::after {
+            content: '🏆';
+            position: absolute;
+            right: -60px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 2rem;
+            animation: bounce 2s ease-in-out infinite 0.5s;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateY(-50%) scale(1); }
+            50% { transform: translateY(-60%) scale(1.1); }
+        }
+
+        .event-info {
+            font-size: 1.3rem;
+            color: #475569;
+            margin: 30px 0 20px;
+            font-weight: 500;
+        }
+
+        .event-name {
+            font-family: 'Orbitron', monospace;
+            font-size: 2.2rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #c084fc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin: 20px 0 30px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            position: relative;
+        }
+
+        .recognition-text {
+            font-size: 1.1rem;
+            color: #64748b;
+            font-style: italic;
+            max-width: 700px;
+            margin: 0 auto;
+            line-height: 1.6;
+            background: rgba(100, 116, 139, 0.05);
+            padding: 20px 30px;
+            border-radius: 16px;
+            border-left: 4px solid #3b82f6;
+        }
+
+        .footer {
             display: flex;
             justify-content: space-between;
             align-items: flex-end;
-            margin-top: 60px;
+            margin-top: 40px;
             position: relative;
-            z-index: 2;
+            z-index: 3;
         }
 
-        .signature-section {
+        .signature-block {
             text-align: center;
             flex: 1;
-            margin: 0 20px;
+            max-width: 200px;
+            position: relative;
         }
 
         .signature-line {
-            width: 200px;
-            height: 2px;
-            background: #34495e;
-            margin: 0 auto 10px;
+            width: 180px;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, #1e293b, transparent);
+            margin: 0 auto 15px;
+            border-radius: 2px;
         }
 
-        .signature-text {
-            font-size: 1rem;
-            color: #7f8c8d;
-            font-weight: bold;
+        .signature-name {
+            font-size: 1.1rem;
+            color: #1e293b;
+            font-weight: 700;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
 
-        .date-section {
+        .signature-title {
+            font-size: 0.95rem;
+            color: #64748b;
+            font-weight: 500;
+        }
+
+        .date-block {
             position: absolute;
             bottom: 0;
             left: 50%;
             transform: translateX(-50%);
             text-align: center;
+            background: rgba(59, 130, 246, 0.1);
+            padding: 15px 25px;
+            border-radius: 50px;
+            border: 2px solid rgba(59, 130, 246, 0.2);
         }
 
-        .date-text {
-            font-size: 1.1rem;
-            color: #34495e;
-            font-weight: bold;
+        .date-label {
+            font-size: 0.9rem;
+            color: #64748b;
+            margin-bottom: 5px;
+            font-weight: 500;
         }
 
-        .watermark {
+        .date-value {
+            font-size: 1.2rem;
+            color: #1e40af;
+            font-weight: 700;
+            font-family: 'Orbitron', monospace;
+        }
+
+        .verification-code {
             position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%) rotate(-45deg);
-            font-size: 8rem;
-            color: rgba(52, 73, 94, 0.05);
-            font-weight: bold;
-            text-transform: uppercase;
-            letter-spacing: 10px;
-            z-index: 1;
-            pointer-events: none;
-            user-select: none;
+            bottom: 20px;
+            right: 25px;
+            font-family: 'Orbitron', monospace;
+            font-size: 0.85rem;
+            color: #94a3b8;
+            background: rgba(148, 163, 184, 0.1);
+            padding: 8px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(148, 163, 184, 0.2);
         }
 
-        .decorative-elements {
+        .floating-elements {
             position: absolute;
-            top: 30px;
-            left: 30px;
-            right: 30px;
-            height: 40px;
-            background: repeating-linear-gradient(
-                90deg,
-                #3498db,
-                #3498db 10px,
-                #e74c3c 10px,
-                #e74c3c 20px,
-                #f39c12 20px,
-                #f39c12 30px,
-                #27ae60 30px,
-                #27ae60 40px
-            );
-            border-radius: 5px;
-        }
-
-        .decorative-elements::after {
-            content: '';
-            position: absolute;
-            bottom: -520px;
+            top: 0;
             left: 0;
             right: 0;
-            height: 40px;
-            background: repeating-linear-gradient(
-                90deg,
-                #3498db,
-                #3498db 10px,
-                #e74c3c 10px,
-                #e74c3c 20px,
-                #f39c12 20px,
-                #f39c12 30px,
-                #27ae60 30px,
-                #27ae60 40px
-            );
-            border-radius: 5px;
+            bottom: 0;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .star {
+            position: absolute;
+            color: #fbbf24;
+            font-size: 1.5rem;
+            animation: twinkle 3s ease-in-out infinite;
+        }
+
+        .star:nth-child(1) { top: 15%; left: 10%; animation-delay: 0s; }
+        .star:nth-child(2) { top: 25%; right: 15%; animation-delay: 0.5s; }
+        .star:nth-child(3) { bottom: 30%; left: 8%; animation-delay: 1s; }
+        .star:nth-child(4) { bottom: 20%; right: 12%; animation-delay: 1.5s; }
+        .star:nth-child(5) { top: 40%; left: 5%; animation-delay: 2s; }
+        .star:nth-child(6) { top: 60%; right: 8%; animation-delay: 2.5s; }
+
+        @keyframes twinkle {
+            0%, 100% { opacity: 0.3; transform: scale(1) rotate(0deg); }
+            50% { opacity: 1; transform: scale(1.2) rotate(180deg); }
         }
 
         .download-section {
+            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+            padding: 40px;
             text-align: center;
-            padding: 30px;
-            background: #f8f9fa;
+            border-top: 1px solid rgba(148, 163, 184, 0.2);
+            position: relative;
+        }
+
+        .download-section::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, #3b82f6, #8b5cf6, transparent);
         }
 
         .download-btn {
-            background: linear-gradient(45deg, #667eea, #764ba2);
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 50%, #1e40af 100%);
             color: white;
             border: none;
-            padding: 15px 40px;
-            font-size: 1.2rem;
-            font-weight: bold;
+            padding: 18px 40px;
+            font-size: 1.1rem;
+            font-weight: 700;
             border-radius: 50px;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
             text-transform: uppercase;
             letter-spacing: 1px;
-            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(59, 130, 246, 0.3);
+        }
+
+        .download-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+            transition: left 0.5s;
         }
 
         .download-btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 15px 30px rgba(102, 126, 234, 0.4);
+            transform: translateY(-3px) scale(1.05);
+            box-shadow: 0 20px 40px rgba(59, 130, 246, 0.4);
         }
 
-        .download-btn:active {
-            transform: translateY(-1px);
+        .download-btn:hover::before {
+            left: 100%;
         }
 
-        .hack-code {
-            position: absolute;
-            bottom: 10px;
-            right: 20px;
-            font-size: 0.9rem;
-            color: #bdc3c7;
-            font-family: 'Courier New', monospace;
+        .download-btn:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
         }
 
         /* Mobile Responsiveness */
         @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+
             .certificate {
-                border: 10px solid #2c3e50;
-                padding: 20px;
+                padding: 30px 20px;
+                aspect-ratio: unset;
+                min-height: 600px;
+            }
+
+            .certificate-title {
+                font-size: 2.5rem;
+                letter-spacing: 4px;
+            }
+
+            .participant-name {
+                font-size: 2.5rem;
+                letter-spacing: 1px;
+            }
+
+            .achievement {
+                font-size: 2rem;
+            }
+
+            .achievement::before,
+            .achievement::after {
+                display: none;
+            }
+
+            .event-name {
+                font-size: 1.8rem;
+            }
+
+            .footer {
+                flex-direction: column;
+                gap: 30px;
+            }
+
+            .signature-block {
+                max-width: none;
+            }
+
+            .date-block {
+                position: static;
+                transform: none;
+                margin: 20px auto 0;
+            }
+
+            .star {
+                font-size: 1rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .certificate {
+                padding: 20px 15px;
+                min-height: 500px;
             }
 
             .certificate-title {
@@ -292,60 +558,29 @@
             }
 
             .participant-name {
-                font-size: 2.5rem;
-                letter-spacing: 1px;
-            }
-
-            .hackathon-name {
-                font-size: 1.8rem;
-            }
-
-            .prize-level {
-                font-size: 1.5rem;
-            }
-
-            .watermark {
-                font-size: 5rem;
-            }
-
-            .certificate-footer {
-                flex-direction: column;
-                gap: 30px;
-            }
-
-            .signature-section {
-                margin: 0;
-            }
-
-            .decorative-elements::after {
-                bottom: -420px;
-            }
-        }
-
-        @media (max-width: 480px) {
-            .certificate {
-                padding: 15px;
-                border: 8px solid #2c3e50;
-            }
-
-            .certificate-title {
-                font-size: 1.5rem;
-            }
-
-            .participant-name {
                 font-size: 2rem;
             }
 
-            .hackathon-name {
+            .achievement {
+                font-size: 1.6rem;
+            }
+
+            .event-name {
                 font-size: 1.4rem;
             }
 
-            .watermark {
-                font-size: 4rem;
+            .team-info {
+                padding: 12px 20px;
+                font-size: 1rem;
+            }
+
+            .recognition-text {
+                padding: 15px 20px;
+                font-size: 1rem;
             }
         }
 
-        /* Print/PDF Styles */
+        /* PDF Optimization */
         @media print {
             body {
                 background: white;
@@ -353,14 +588,61 @@
                 padding: 0;
             }
 
+            body::before,
+            .glow-border,
+            .floating-elements {
+                display: none;
+            }
+
             .container {
+                max-width: none;
                 box-shadow: none;
                 border-radius: 0;
-                max-width: none;
+                background: white;
+            }
+
+            .certificate {
+                page-break-inside: avoid;
             }
 
             .download-section {
                 display: none;
+            }
+        }
+
+        /* Animations */
+        .certificate {
+            opacity: 0;
+            transform: scale(0.95) rotateX(10deg);
+            animation: enterCertificate 1s ease-out forwards;
+        }
+
+        @keyframes enterCertificate {
+            to {
+                opacity: 1;
+                transform: scale(1) rotateX(0deg);
+            }
+        }
+
+        .content > * {
+            opacity: 0;
+            transform: translateY(20px);
+            animation: slideUp 0.6s ease-out forwards;
+        }
+
+        .content > *:nth-child(1) { animation-delay: 0.2s; }
+        .content > *:nth-child(2) { animation-delay: 0.4s; }
+        .content > *:nth-child(3) { animation-delay: 0.6s; }
+        .content > *:nth-child(4) { animation-delay: 0.8s; }
+        .content > *:nth-child(5) { animation-delay: 1s; }
+        .content > *:nth-child(6) { animation-delay: 1.2s; }
+        .content > *:nth-child(7) { animation-delay: 1.4s; }
+        .content > *:nth-child(8) { animation-delay: 1.6s; }
+
+        @keyframes slideUp {
+            to {
+                opacity: 1;
+                transform: translateY(0);
             }
         }
     </style>
@@ -368,139 +650,203 @@
 <body>
     <div class="container">
         <div class="certificate" id="certificate">
-            <div class="decorative-elements"></div>
-            <div class="watermark">VERIFIED</div>
-            <div class="hack-code">{{hack_code}}</div>
+            <div class="glow-border"></div>
             
-            <div class="certificate-header">
+            <div class="floating-elements">
+                <div class="star">✦</div>
+                <div class="star">✦</div>
+                <div class="star">✦</div>
+                <div class="star">✦</div>
+                <div class="star">✦</div>
+                <div class="star">✦</div>
+            </div>
+            
+            <div class="verification-code">{{hack_code}}</div>
+            
+            <div class="header">
                 <div class="certificate-title">Certificate</div>
-                <div class="certificate-subtitle">of Achievement</div>
+                <div class="certificate-subtitle">of Excellence</div>
             </div>
 
-            <div class="certificate-body">
-                <div class="awarded-text">This is to certify that</div>
+            <div class="content">
+                <div class="presented-to">This certificate is proudly presented to</div>
+                
                 <div class="participant-name">{{participant_name}}</div>
-                <div class="team-info">representing Team: <strong>{{team_name}}</strong></div>
-                <div class="achievement-text">
-                    has successfully achieved
+                
+                <div class="team-info">
+                    Member of Team: <span class="team-name">{{team_name}}</span>
                 </div>
-                <div class="prize-level">{{achievement}}</div>
-                <div class="achievement-text">
-                    in the
-                </div>
-                <div class="hackathon-name">{{event_name}}</div>
-                <div class="achievement-text">
-                    demonstrating exceptional skills, creativity, and innovation
+
+                <div class="achievement-text">For outstanding achievement of</div>
+                
+                <div class="achievement">{{achievement}}</div>
+                
+                <div class="event-info">in the prestigious</div>
+                
+                <div class="event-name">{{event_name}}</div>
+                
+                <div class="recognition-text">
+                    In recognition of exceptional technical skills, innovative thinking, and collaborative excellence demonstrated throughout the competition.
                 </div>
             </div>
 
-            <div class="certificate-footer">
-                <div class="signature-section">
+            <div class="footer">
+                <div class="signature-block">
                     <div class="signature-line"></div>
-                    <div class="signature-text">{{organizer_name}}</div>
+                    <div class="signature-name">{{organizer_name}}</div>
+                    <div class="signature-title">Event Organizer</div>
                 </div>
                 
-                <div class="date-section">
-                    <div class="date-text">{{certificate_date}}</div>
+                <div class="date-block">
+                    <div class="date-label">Date of Achievement</div>
+                    <div class="date-value">{{certificate_date}}</div>
                 </div>
                 
-                <div class="signature-section">
+                <div class="signature-block">
                     <div class="signature-line"></div>
-                    <div class="signature-text">Technical Lead</div>
+                    <div class="signature-name">Technical Director</div>
+                    <div class="signature-title">Validation Authority</div>
                 </div>
             </div>
         </div>
 
         <div class="download-section">
-            <button class="download-btn" onclick="downloadPDF()">
-                📥 Download Certificate as PDF
+            <button class="download-btn" onclick="downloadCertificate()">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                    <polyline points="7,10 12,15 17,10"/>
+                    <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Download Certificate
             </button>
         </div>
     </div>
 
     <script>
-        // Function to download certificate as PDF
-        function downloadPDF() {
-            const element = document.getElementById('certificate');
-            const participantName = '{{participant_name}}';
-            const eventName = '{{event_name}}';
+        function downloadCertificate() {
+            const certificate = document.getElementById('certificate');
+            const participantName = '{{participant_name}}' || 'Certificate';
+            const eventName = '{{event_name}}' || 'Event';
+            const button = document.querySelector('.download-btn');
             
-            const opt = {
-                margin: 0.5,
-                filename: `${eventName}_Certificate_${participantName}.pdf`,
-                image: { type: 'jpeg', quality: 1.0 },
+            // Show loading state with cool animation
+            const originalContent = button.innerHTML;
+            button.innerHTML = `
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation: spin 1s linear infinite;">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="m8 12 4-4 4 4"/>
+                    <path d="M8 12l4 4 4-4"/>
+                </svg>
+                Generating PDF...
+            `;
+            button.disabled = true;
+
+            const options = {
+                margin: 0,
+                filename: `${eventName}_Certificate_${participantName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+                image: { 
+                    type: 'jpeg', 
+                    quality: 1.0 
+                },
                 html2canvas: { 
-                    scale: 3,
+                    scale: 2.5,
                     useCORS: true,
                     letterRendering: true,
-                    allowTaint: false
+                    allowTaint: false,
+                    backgroundColor: '#ffffff',
+                    width: certificate.offsetWidth,
+                    height: certificate.offsetHeight
                 },
                 jsPDF: { 
-                    unit: 'in', 
-                    format: 'a4', 
-                    orientation: 'landscape',
-                    compress: true
+                    unit: 'px', 
+                    format: [certificate.offsetWidth, certificate.offsetHeight], 
+                    orientation: certificate.offsetWidth > certificate.offsetHeight ? 'landscape' : 'portrait',
+                    hotfixes: ['px_scaling']
+                },
+                pagebreak: { 
+                    mode: 'avoid-all' 
                 }
             };
 
-            // Show loading state
-            const btn = document.querySelector('.download-btn');
-            const originalText = btn.innerHTML;
-            btn.innerHTML = '⏳ Generating PDF...';
-            btn.disabled = true;
-
-            html2pdf().set(opt).from(element).save().then(() => {
-                // Reset button state
-                btn.innerHTML = originalText;
-                btn.disabled = false;
-            }).catch((error) => {
-                console.error('PDF generation failed:', error);
-                btn.innerHTML = '❌ Download Failed - Try Again';
-                btn.disabled = false;
-                setTimeout(() => {
-                    btn.innerHTML = originalText;
-                }, 3000);
-            });
+            html2pdf()
+                .set(options)
+                .from(certificate)
+                .save()
+                .then(() => {
+                    button.innerHTML = `
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M20 6 9 17l-5-5"/>
+                        </svg>
+                        Downloaded Successfully!
+                    `;
+                    setTimeout(() => {
+                        button.innerHTML = originalContent;
+                        button.disabled = false;
+                    }, 2500);
+                })
+                .catch((error) => {
+                    console.error('PDF generation failed:', error);
+                    button.innerHTML = `
+                        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="15" y1="9" x2="9" y2="15"/>
+                            <line x1="9" y1="9" x2="15" y2="15"/>
+                        </svg>
+                        Failed - Try Again
+                    `;
+                    setTimeout(() => {
+                        button.innerHTML = originalContent;
+                        button.disabled = false;
+                    }, 3000);
+                });
         }
 
-        // Add keyboard shortcut for PDF download (Ctrl+P or Cmd+P)
+        // Add CSS for spin animation
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes spin {
+                from { transform: rotate(0deg); }
+                to { transform: rotate(360deg); }
+            }
+        `;
+        document.head.appendChild(style);
+
+        // Keyboard shortcuts
         document.addEventListener('keydown', function(e) {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
                 e.preventDefault();
-                downloadPDF();
+                downloadCertificate();
             }
         });
 
-        // Prevent right-click and text selection for security
-        document.addEventListener('contextmenu', function(e) {
+        // Security features
+        document.getElementById('certificate').addEventListener('contextmenu', function(e) {
             e.preventDefault();
         });
 
-        document.addEventListener('selectstart', function(e) {
-            if (e.target.closest('.certificate')) {
-                e.preventDefault();
-            }
+        document.getElementById('certificate').addEventListener('selectstart', function(e) {
+            e.preventDefault();
         });
 
-        // Prevent copying
-        document.addEventListener('copy', function(e) {
-            if (e.target.closest('.certificate')) {
-                e.preventDefault();
-            }
-        });
-
-        // Add some animation on load
-        document.addEventListener('DOMContentLoaded', function() {
+        // Cool scroll effect for mobile
+        let ticking = false;
+        function updateOnScroll() {
+            const scrolled = window.pageYOffset;
             const certificate = document.getElementById('certificate');
-            certificate.style.opacity = '0';
-            certificate.style.transform = 'scale(0.95)';
-            certificate.style.transition = 'all 0.5s ease';
-            
-            setTimeout(() => {
-                certificate.style.opacity = '1';
-                certificate.style.transform = 'scale(1)';
-            }, 100);
-        });
+            if (certificate) {
+                certificate.style.transform = `translateY(${scrolled * 0.1}px) scale(${1 - scrolled * 0.0001})`;
+            }
+            ticking = false;
+        }
+
+        function requestTick() {
+            if (!ticking) {
+                requestAnimationFrame(updateOnScroll);
+                ticking = true;
+            }
+        }
+
+        window.addEventListener('scroll', requestTick, { passive: true });
     </script>
 </body>
 </html>
