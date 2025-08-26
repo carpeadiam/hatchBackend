@@ -1064,10 +1064,10 @@ def send_certificate_email(participant_email, participant_name, event_name, cert
 
 # Keep the existing certificate generation endpoint as well
 @app.route("/certificate", methods=["GET"])
-def generate_certificate():
+def generate_certificate_alt():
     """
-    Generate certificate for a participant
-    URL: /certificate?hackCode=HACK-D5AE6861&teamId=abc123&rank=1
+    Alternative approach using templates folder
+    Place the certificate.html template in your Flask templates/ directory
     """
     hack_code = request.args.get("hackCode")
     team_id = request.args.get("teamId")
@@ -1077,12 +1077,11 @@ def generate_certificate():
         return jsonify({"error": "hackCode and teamId are required"}), 400
     
     try:
-        # Fetch hackathon details
+        # Same data processing logic...
         hackathon = hackathons.find_one({"hackCode": hack_code})
         if not hackathon:
             return jsonify({"error": "Hackathon not found"}), 404
         
-        # Find the specific team
         team = None
         for registration in hackathon.get("registrations", []):
             if registration.get("teamId") == team_id:
@@ -1092,16 +1091,12 @@ def generate_certificate():
         if not team:
             return jsonify({"error": "Team not found"}), 404
         
-        # Get participant details (team leader as primary recipient)
         participant_name = team.get("teamLeader", {}).get("name", "Participant")
         team_name = team.get("teamName", "Team")
-        
-        # Get hackathon details
         event_name = hackathon.get("eventName", "Hackathon Event")
         organizers = hackathon.get("organisers", [])
         organizer_name = organizers[0].get("name", "Event Organizer") if organizers else "Event Organizer"
         
-        # Determine achievement based on rank
         try:
             rank_int = int(rank)
             if rank_int == 1:
@@ -1115,10 +1110,8 @@ def generate_certificate():
         except:
             achievement = "Certificate of Participation"
         
-        # Get current date
         current_date = datetime.now().strftime("%B %d, %Y")
         
-        # Prepare template data
         template_data = {
             'participant_name': participant_name,
             'team_name': team_name,
@@ -1129,16 +1122,10 @@ def generate_certificate():
             'hack_code': hack_code
         }
         
-        # Read and render the HTML template using Jinja2
-        try:
-            with open('certificate.html', 'r', encoding='utf-8') as file:
-                template_content = file.read()
-                
-            # Use Flask's render_template_string with Jinja2 templating
-            return render_template_string(template_content, **template_data)
-            
-        except FileNotFoundError:
-            return jsonify({"error": "Certificate template not found"}), 500
+        # Use Flask's render_template for external template file
+        # Make sure certificate.html is in your templates/ directory
+        from flask import render_template
+        return render_template('certificate.html', **template_data)
             
     except Exception as e:
         logger.error(f"Error generating certificate: {str(e)}")
