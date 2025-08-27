@@ -1197,7 +1197,288 @@ def check_plagiarism():
             "message": str(e)
         }), 500
     
+@app.route("/sponsor-showcase", methods=["POST"])
+@token_required
+def add_sponsor_showcase():
+    """
+    Add or update sponsor showcase video for a hackathon.
+    Only admins of the hackathon can add/update sponsor showcases.
+    
+    Expected payload:
+    {
+        "hackCode": "HACK-XXXX",
+        "sponsorName": "Sponsor Name",
+        "youtubeUrl": "https://www.youtube.com/watch?v=VIDEO_ID",
+        "title": "Showcase Title",
+        "description": "Showcase Description",
+        "tier": "platinum|gold|silver|bronze", // optional
+        "logo": "https://logo-url.com", // optional
+        "website": "https://website.com" // optional
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    user_email = g.user["email"]
+    
+    hack_code = data.get("hackCode")
+    sponsor_name = data.get("sponsorName")
+    youtube_url = data.get("youtubeUrl")
+    title = data.get("title")
+    description = data.get("description", "")
+    tier = data.get("tier", "bronze")
+    logo = data.get("logo", "")
+    website = data.get("website", "")
+    
+    if not hack_code or not sponsor_name or not youtube_url or not title:
+        return jsonify({"error": "hackCode, sponsorName, youtubeUrl, and title are required"}), 400
+    
+    # Validate YouTube URL
+    is_valid, video_id, error_msg = validate_youtube_url(youtube_url)
+    if not is_valid:
+        return jsonify({"error": error_msg}), 400
+    
+    # Check if hackathon exists
+    hackathon = hackathons.find_one({"hackCode": hack_code})
+    if not hackathon:
+        return jsonify({"error": "Hackathon not found"}), 404
+    
+    # Check if user is admin
+    if user_email not in hackathon.get("admins", []):
+        return jsonify({"error": "Not authorized. Only admins can manage sponsor showcases."}), 403
+    
+    # Prepare showcase data
+    showcase_data = {
+        "youtubeUrl": youtube_url,
+        "videoId": video_id,
+        "title": title,
+        "description": description,
+        "uploadedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "isActive": True
+    }
+    
+    # Find existing sponsor or create new one
+    sponsors = hackathon.get("sponsors", [])
+    sponsor_found = False
+    
+    for sponsor in sponsors:
+        if sponsor.get("name", "").lower() == sponsor_name.lower():
+            # Update existing sponsor
+            sponsor["showcase"] = showcase_data
+            if tier:
+                sponsor["tier"] = tier
+            if logo:
+                sponsor["logo"] = logo
+            if website:
+                sponsor["website"] = website
+            sponsor_found = True
+            break
+    
+    if not sponsor_found:
+        # Create new sponsor entry
+        new_sponsor = {
+            "name": sponsor_name,
+            "tier": tier,
+            "logo": logo,
+            "website": website,
+            "showcase": showcase_data
+        }
+        sponsors.append(new_sponsor)
+    
+    # Update hackathon document
+    try:
+        result = hackathons.update_one(
+            {"hackCode": hack_code},
+            {"$set": {"sponsors": sponsors}}
+        )
+        
+        if result.modified_count == 0:
+            return jsonify({"error": "Failed to update sponsor showcase"}), 500
+        
+        logger.info(f"Sponsor showcase added/updated for {sponsor_name} in hackathon {hack_code} by {user_email}")
+        
+        return jsonify({
+            "message": "Sponsor showcase added/updated successfully",
+            "sponsorName": sponsor_name,
+            "videoId": video_id,
+            "showcase": showcase_data
+        }), 201
+        
+    except Exception as e:
+        logger.error(f"Error updating sponsor showcase: {str(e)}")
+        return jsonify({"error": "Failed to update sponsor showcase", "details": str(e)}), 500
 
+
+@app.route("/sponsor-showcase", methods=["GET"])
+def get_sponsor_showcases():
+    """
+    Get all sponsor showcases for a hackathon.
+    Query params: ?hackCode=HACK-XXXX&activeOnly=true
+    """
+    hack_code = request.args.get("hackCode")
+    active_only = request.args.get("activeOnly", "false").lower() == "true"
+    
+    if not hack_code:
+        return jsonify({"error": "hackCode is required"}), 400
+    
+    hackathon = hackathons.find_one({"hackCode": hack_code}, {"sponsors": 1, "eventName": 1, "_id": 0})
+    if not hackathon:
+        return jsonify({"error": "Hackathon not found"}), 404
+    
+    sponsors = hackathon.get("sponsors", [])
+    showcases = []
+    
+    for sponsor in sponsors:
+        if "showcase" in sponsor:
+            showcase = sponsor["showcase"]
+            if not active_only or showcase.get("isActive", True):
+                sponsor_info = {
+                    "name": sponsor.get("name", ""),
+                    "tier": sponsor.get("tier", "bronze"),
+                    "logo": sponsor.get("logo", ""),
+                    "website": sponsor.get("website", ""),
+                    "showcase": showcase
+                }
+                showcases.append(sponsor_info)
+    
+    return jsonify({
+        "hackCode": hack_code,
+        "eventName": hackathon.get("eventName", ""),
+        "showcases": showcases,
+        "total": len(showcases)
+    }), 200
+
+
+@app.route("/sponsor-showcase/<sponsor_name>", methods=["DELETE"])
+@token_required
+def remove_sponsor_showcase(sponsor_name):
+    """
+    Remove sponsor showcase or deactivate it.
+    Query params: ?hackCode=HACK-XXXX&action=remove|deactivate
+    """
+    hack_code = request.args.get("hackCode")
+    action = request.args.get("action", "deactivate")  # remove or deactivate
+    user_email = g.user["email"]
+    
+    if not hack_code:
+        return jsonify({"error": "hackCode is required"}), 400
+    
+    if action not in ["remove", "deactivate"]:
+        return jsonify({"error": "action must be 'remove' or 'deactivate'"}), 400
+    
+    # Check if hackathon exists
+    hackathon = hackathons.find_one({"hackCode": hack_code})
+    if not hackathon:
+        return jsonify({"error": "Hackathon not found"}), 404
+    
+    # Check if user is admin
+    if user_email not in hackathon.get("admins", []):
+        return jsonify({"error": "Not authorized. Only admins can manage sponsor showcases."}), 403
+    
+    sponsors = hackathon.get("sponsors", [])
+    sponsor_found = False
+    
+    for sponsor in sponsors:
+        if sponsor.get("name", "").lower() == sponsor_name.lower():
+            if "showcase" in sponsor:
+                if action == "remove":
+                    del sponsor["showcase"]
+                elif action == "deactivate":
+                    sponsor["showcase"]["isActive"] = False
+                sponsor_found = True
+                break
+    
+    if not sponsor_found:
+        return jsonify({"error": f"Sponsor '{sponsor_name}' or their showcase not found"}), 404
+    
+    # Update hackathon document
+    try:
+        result = hackathons.update_one(
+            {"hackCode": hack_code},
+            {"$set": {"sponsors": sponsors}}
+        )
+        
+        if result.modified_count == 0:
+            return jsonify({"error": "Failed to update sponsor showcase"}), 500
+        
+        logger.info(f"Sponsor showcase {action}d for {sponsor_name} in hackathon {hack_code} by {user_email}")
+        
+        return jsonify({
+            "message": f"Sponsor showcase {action}d successfully",
+            "sponsorName": sponsor_name,
+            "action": action
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error {action}ing sponsor showcase: {str(e)}")
+        return jsonify({"error": f"Failed to {action} sponsor showcase", "details": str(e)}), 500
+
+
+@app.route("/sponsor-showcase/reorder", methods=["POST"])
+@token_required
+def reorder_sponsor_showcases():
+    """
+    Reorder sponsor showcases for display priority.
+    
+    Expected payload:
+    {
+        "hackCode": "HACK-XXXX",
+        "sponsorOrder": ["Sponsor1", "Sponsor2", "Sponsor3"]
+    }
+    """
+    data = request.get_json(silent=True) or {}
+    user_email = g.user["email"]
+    
+    hack_code = data.get("hackCode")
+    sponsor_order = data.get("sponsorOrder", [])
+    
+    if not hack_code or not sponsor_order:
+        return jsonify({"error": "hackCode and sponsorOrder are required"}), 400
+    
+    # Check if hackathon exists
+    hackathon = hackathons.find_one({"hackCode": hack_code})
+    if not hackathon:
+        return jsonify({"error": "Hackathon not found"}), 404
+    
+    # Check if user is admin
+    if user_email not in hackathon.get("admins", []):
+        return jsonify({"error": "Not authorized. Only admins can manage sponsor showcases."}), 403
+    
+    sponsors = hackathon.get("sponsors", [])
+    reordered_sponsors = []
+    
+    # Reorder sponsors based on the provided order
+    for sponsor_name in sponsor_order:
+        for sponsor in sponsors:
+            if sponsor.get("name", "").lower() == sponsor_name.lower():
+                reordered_sponsors.append(sponsor)
+                break
+    
+    # Add any remaining sponsors not in the order list
+    for sponsor in sponsors:
+        sponsor_name = sponsor.get("name", "")
+        if not any(s.get("name", "").lower() == sponsor_name.lower() for s in reordered_sponsors):
+            reordered_sponsors.append(sponsor)
+    
+    # Update hackathon document
+    try:
+        result = hackathons.update_one(
+            {"hackCode": hack_code},
+            {"$set": {"sponsors": reordered_sponsors}}
+        )
+        
+        if result.modified_count == 0:
+            return jsonify({"error": "Failed to reorder sponsor showcases"}), 500
+        
+        logger.info(f"Sponsor showcases reordered in hackathon {hack_code} by {user_email}")
+        
+        return jsonify({
+            "message": "Sponsor showcases reordered successfully",
+            "newOrder": [s.get("name", "") for s in reordered_sponsors]
+        }), 200
+        
+    except Exception as e:
+        logger.error(f"Error reordering sponsor showcases: {str(e)}")
+        return jsonify({"error": "Failed to reorder sponsor showcases", "details": str(e)}), 500
+    
     
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
