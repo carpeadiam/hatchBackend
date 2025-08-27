@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Certificate - {{ participant_name }}</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * {
@@ -16,44 +17,90 @@
         body {
             font-family: 'Inter', sans-serif;
             background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
-            height: 100vh;
+            min-height: 100vh;
             display: flex;
-            justify-content: center;
+            flex-direction: column;
             align-items: center;
-            padding: 0px;
+            padding: 20px;
             position: relative;
-            overflow: hidden;
-            align-self: center;
         }
 
-        .container {
-            width: 100%;
-            height: 100%;
-            max-width: 155vh;
-            max-height: 100vh;
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25);
-            overflow: hidden;
+        /* Stable download button positioned at bottom center */
+        .download-controls {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
             display: flex;
-            flex-direction: column;
+            gap: 10px;
         }
 
-        .certificate {
-            width: 100%;
-            height: 90vh;
-            position: relative;
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-            padding: 40px 50px;
+        .download-btn {
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            color: white;
+            border: none;
+            padding: 16px 32px;
+            font-size: 1rem;
+            font-weight: 700;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: all 0.2s ease;
             display: flex;
-            flex-direction: column;
-            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            box-shadow: 0 8px 32px rgba(59, 130, 246, 0.3);
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(255, 255, 255, 0.1);
+            min-width: 200px;
+            justify-content: center;
+        }
+
+        .download-btn:hover:not(:disabled) {
+            transform: translateY(-3px);
+            box-shadow: 0 12px 40px rgba(59, 130, 246, 0.4);
+            background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+        }
+
+        .download-btn:active:not(:disabled) {
+            transform: translateY(-1px);
+        }
+
+        .download-btn:disabled {
+            opacity: 0.8;
+            cursor: not-allowed;
+            transform: none;
+            background: linear-gradient(135deg, #94a3b8 0%, #64748b 100%);
+        }
+
+        /* Certificate container - fixed size for single page PDF */
+        .certificate-container {
+            width: 297mm; /* A4 landscape width */
+            height: 210mm; /* A4 landscape height */
+            background: white;
+            margin: 20px auto;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
             overflow: hidden;
+            position: relative;
             print-color-adjust: exact;
             -webkit-print-color-adjust: exact;
         }
 
-        /* Border decoration */
+        .certificate {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            padding: 40px 60px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            overflow: hidden;
+        }
+
         .certificate::after {
             content: '';
             position: absolute;
@@ -61,21 +108,21 @@
             left: 20px;
             right: 20px;
             bottom: 20px;
-            border: 3px solid #3b82f6;
+            border: 4px solid #3b82f6;
             pointer-events: none;
             border-radius: 12px;
         }
 
         .header {
             text-align: center;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
             position: relative;
             z-index: 3;
         }
 
         .certificate-title {
             font-family: 'Orbitron', monospace;
-            font-size: 2.5rem;
+            font-size: 3rem;
             font-weight: 900;
             color: #1e293b;
             letter-spacing: 8px;
@@ -98,7 +145,7 @@
         }
 
         .certificate-subtitle {
-            font-size: 1rem;
+            font-size: 1.1rem;
             color: #64748b;
             font-weight: 500;
             text-transform: uppercase;
@@ -112,13 +159,14 @@
             display: flex;
             flex-direction: column;
             justify-content: center;
-            margin: 0px 0;
             position: relative;
             z-index: 3;
+            max-width: 900px;
+            margin: 0 auto;
         }
 
         .presented-to {
-            font-size: 1rem;
+            font-size: 1.1rem;
             color: #475569;
             margin-bottom: 15px;
             font-weight: 400;
@@ -127,12 +175,12 @@
 
         .participant-name {
             font-family: 'Orbitron', monospace;
-            font-size: 1.5rem;
+            font-size: 2rem;
             font-weight: 700;
             color: #1e40af;
-            margin: 5px 0;
+            margin: 10px 0;
             text-transform: uppercase;
-            letter-spacing: 2px;
+            letter-spacing: 3px;
             position: relative;
             display: inline-block;
             line-height: 1;
@@ -152,17 +200,16 @@
         }
 
         .team-info {
-            font-size: 1.1rem;
+            font-size: 1.2rem;
             color: #64748b;
-            margin: 10px 0;
+            margin: 15px 0;
             font-weight: 500;
             background: rgba(59, 130, 246, 0.08);
-            padding: 12px 25px;
-            border-radius: 20px;
+            padding: 15px 30px;
+            border-radius: 25px;
             border: 2px solid rgba(59, 130, 246, 0.2);
             display: inline-block;
             max-width: 100%;
-            align-self: center;
         }
 
         .team-name {
@@ -173,20 +220,20 @@
         }
 
         .achievement-text {
-            font-size: 1rem;
+            font-size: 1.1rem;
             color: #475569;
-            margin: 18px 0 5px;
+            margin: 20px 0 10px;
             font-weight: 500;
         }
 
         .achievement {
             font-family: 'Orbitron', monospace;
-            font-size: 1.7rem;
+            font-size: 2.2rem;
             font-weight: 700;
             color: #dc2626;
-            margin: 5px 0;
+            margin: 10px 0;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 2px;
             position: relative;
             line-height: 1.1;
         }
@@ -194,49 +241,49 @@
         .achievement::before {
             content: '🏆';
             position: absolute;
-            left: -50px;
+            left: -60px;
             top: 50%;
             transform: translateY(-50%);
-            font-size: 1.8rem;
+            font-size: 2rem;
         }
 
         .achievement::after {
             content: '🏆';
             position: absolute;
-            right: -50px;
+            right: -60px;
             top: 50%;
             transform: translateY(-50%);
-            font-size: 1.8rem;
+            font-size: 2rem;
         }
 
         .event-info {
-            font-size: 1.1rem;
+            font-size: 1.2rem;
             color: #475569;
-            margin: 5px 0 0px;
+            margin: 10px 0;
             font-weight: 500;
         }
 
         .event-name {
             font-family: 'Orbitron', monospace;
-            font-size: 1.7rem;
+            font-size: 2rem;
             font-weight: 700;
             color: #7c3aed;
-            margin: 10px 0 5px;
+            margin: 15px 0;
             text-transform: uppercase;
-            letter-spacing: 1px;
+            letter-spacing: 2px;
             line-height: 1.1;
             word-wrap: break-word;
         }
 
         .recognition-text {
-            font-size: 0.95rem;
+            font-size: 1rem;
             color: #64748b;
             font-style: italic;
             max-width: 700px;
-            margin: 0 auto;
+            margin: 15px auto 0;
             line-height: 1.4;
             background: rgba(100, 116, 139, 0.06);
-            padding: 5px 20px;
+            padding: 15px 25px;
             border-radius: 15px;
             border-left: 4px solid #3b82f6;
             border-right: 4px solid #3b82f6;
@@ -245,29 +292,30 @@
         .footer {
             display: flex;
             justify-content: space-between;
-            margin-top: 10px;
+            align-items: flex-end;
+            margin-top: 20px;
             position: relative;
             z-index: 3;
-            height: 80px;
+            height: 100px;
         }
 
         .signature-block {
             text-align: center;
             flex: 1;
-            max-width: 200px;
+            max-width: 250px;
             position: relative;
         }
 
         .signature-line {
-            width: 150px;
+            width: 180px;
             height: 3px;
             background: #1e293b;
-            margin: 10px auto 10px;
+            margin: 15px auto 12px;
             border-radius: 1px;
         }
 
         .signature-name {
-            font-size: 0.95rem;
+            font-size: 1rem;
             color: #1e293b;
             font-weight: 700;
             margin-bottom: 5px;
@@ -276,32 +324,29 @@
         }
 
         .signature-title {
-            font-size: 0.8rem;
+            font-size: 0.85rem;
             color: #64748b;
             font-weight: 500;
         }
 
         .date-block {
-            position: absolute;
-            bottom: 20%;
-            left: 50%;
-            transform: translateX(-50%);
             text-align: center;
             background: rgba(59, 130, 246, 0.12);
-            padding: 10px 20px;
+            padding: 15px 25px;
             border-radius: 20px;
             border: 2px solid rgba(59, 130, 246, 0.25);
+            flex: 0 0 auto;
         }
 
         .date-label {
-            font-size: 0.8rem;
+            font-size: 0.85rem;
             color: #64748b;
-            margin-bottom: 4px;
+            margin-bottom: 8px;
             font-weight: 500;
         }
 
         .date-value {
-            font-size: 1.1rem;
+            font-size: 1.2rem;
             color: #1e40af;
             font-weight: 700;
             font-family: 'Orbitron', monospace;
@@ -309,8 +354,8 @@
 
         .verification-code {
             position: absolute;
-            bottom: 20px;
-            right: 30px;
+            bottom: 15px;
+            right: 25px;
             font-family: 'Orbitron', monospace;
             font-size: 0.8rem;
             color: #94a3b8;
@@ -320,126 +365,42 @@
             border: 2px solid rgba(148, 163, 184, 0.25);
         }
 
-        .download-section {
-            background-color: #f1f5f9;
-            padding: 15x;
-            text-align: center;
-            border-top: 2px solid rgba(148, 163, 184, 0.2);
-            flex-shrink: 0;
-        }
-
-        .download-btn {
-            background-color: #3b82f6;
-            color: white;
-            border: none;
-            padding: 15px 35px;
-            font-size: 1rem;
-            font-weight: 700;
-            border-radius: 40px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 12px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.35);
-            transform: translateY(15%);
-        }
-
-        .download-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 15px 35px rgba(59, 130, 246, 0.45);
-        }
-
-        .download-btn:disabled {
-            opacity: 0.7;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        /* Mobile Responsiveness */
-        @media (max-width: 1024px) {
-            .certificate {
-                padding: 35px 40px;
-                height: 75vh;
-            }
-
-            .certificate-title {
-                font-size: 3rem;
-                letter-spacing: 6px;
-            }
-
-            .participant-name {
-                font-size: 2.4rem;
-                letter-spacing: 1px;
-            }
-
-            .achievement {
-                font-size: 1.9rem;
-            }
-
-            .event-name {
-                font-size: 1.6rem;
+        /* Responsive scaling for smaller screens */
+        @media (max-width: 1400px) {
+            .certificate-container {
+                transform: scale(0.8);
+                transform-origin: top center;
+                margin: 20px auto;
             }
         }
 
-        @media (max-width: 768px) {
-            body {
-                padding: 10px;
-            }
-
-            .certificate {
-                padding: 25px 20px;
-                height: 80vh;
-            }
-
-            .certificate-title {
-                font-size: 2.2rem;
-                letter-spacing: 4px;
-            }
-
-            .participant-name {
-                font-size: 2rem;
-                letter-spacing: 1px;
-            }
-
-            .achievement {
-                font-size: 1.6rem;
-            }
-
-            .achievement::before,
-            .achievement::after {
-                display: none;
-            }
-
-            .event-name {
-                font-size: 1.4rem;
-            }
-
-            .footer {
-                flex-direction: column;
-                gap: 25px;
-                height: auto;
-            }
-
-            .signature-block {
-                max-width: none;
-            }
-
-            .date-block {
-                position: static;
-                transform: none;
-                margin: 15px auto 0;
-            }
-
-            .recognition-text {
-                font-size: 0.85rem;
-                padding: 12px 16px;
+        @media (max-width: 1100px) {
+            .certificate-container {
+                transform: scale(0.65);
+                transform-origin: top center;
+                margin: 10px auto;
             }
         }
 
-        /* PDF Optimization */
+        @media (max-width: 900px) {
+            .certificate-container {
+                transform: scale(0.5);
+                transform-origin: top center;
+                margin: 0 auto 60px;
+            }
+            
+            .download-controls {
+                bottom: 20px;
+            }
+            
+            .download-btn {
+                padding: 14px 28px;
+                font-size: 0.9rem;
+                min-width: 180px;
+            }
+        }
+
+        /* Print styles */
         @media print {
             body {
                 background: white !important;
@@ -447,20 +408,16 @@
                 padding: 0;
             }
 
-            .container {
-                max-width: none;
-                box-shadow: none;
-                border-radius: 0;
-                background: white !important;
+            .certificate-container {
+                transform: none !important;
+                margin: 0 !important;
+                box-shadow: none !important;
+                border-radius: 0 !important;
+                width: 100% !important;
+                height: 100vh !important;
             }
 
-            .certificate {
-                page-break-inside: avoid;
-                background: white !important;
-                min-height: auto;
-            }
-
-            .download-section {
+            .download-controls {
                 display: none !important;
             }
 
@@ -481,7 +438,20 @@
     </style>
 </head>
 <body>
-    <div class="container">
+    <!-- Download controls positioned outside certificate -->
+    <div class="download-controls">
+        <button class="download-btn" onclick="downloadCertificate()" id="downloadBtn">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7,10 12,15 17,10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Download PDF
+        </button>
+    </div>
+
+    <!-- Certificate with fixed A4 landscape dimensions -->
+    <div class="certificate-container">
         <div class="certificate" id="certificate">            
             <div class="verification-code">{{ hack_code }}</div>
             
@@ -531,17 +501,6 @@
                 </div>
             </div>
         </div>
-
-        <div class="download-section">
-            <button class="download-btn" onclick="downloadCertificate()">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="7,10 12,15 17,10"/>
-                    <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-                Download Certificate
-            </button>
-        </div>
     </div>
 
     <script>
@@ -549,79 +508,107 @@
             const certificate = document.getElementById('certificate');
             const participantName = '{{ participant_name }}';
             const eventName = '{{ event_name }}';
-            const button = document.querySelector('.download-btn');
+            const button = document.getElementById('downloadBtn');
             
             const originalContent = button.innerHTML;
             button.innerHTML = `
-                <svg class="loading-spinner" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg class="loading-spinner" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="3"/>
-                    <path d="m8 12 4-4 4 4"/>
-                    <path d="M8 12l4 4 4-4"/>
                 </svg>
-                Generating PDF...
+                Generating...
             `;
             button.disabled = true;
 
-            const options = {
-                margin: [5, 5, 0, 0],
-                filename: `${eventName.replace(/[^a-zA-Z0-9]/g, '_')}_Certificate_${participantName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
-                image: { 
-                    type: 'jpeg', 
-                    quality: 0.98 
-                },
-                html2canvas: { 
-                    scale: 1,
+            // Wait for any fonts to load and layout to settle
+            setTimeout(() => {
+                // Use html2canvas to capture the certificate exactly as rendered
+                html2canvas(certificate, {
+                    scale: 2, // High quality
                     useCORS: true,
-                    letterRendering: true,
                     allowTaint: false,
                     backgroundColor: '#ffffff',
                     scrollX: 0,
                     scrollY: 0,
+                    // Let html2canvas determine dimensions from the actual element
+                    removeContainer: false,
+                    imageTimeout: 15000,
+                    logging: false,
                     width: certificate.scrollWidth,
-                    height: certificate.scrollHeight
-                },
-                jsPDF: { 
-                    unit: 'mm',
-                    format: 'a4',
-                    orientation: 'landscape'
-                }
-            };
-
-            setTimeout(() => {
-                html2pdf()
-                    .set(options)
-                    .from(certificate)
-                    .save()
-                    .then(() => {
-                        button.innerHTML = `
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M20 6 9 17l-5-5"/>
-                            </svg>
-                            Downloaded Successfully!
-                        `;
-                        setTimeout(() => {
-                            button.innerHTML = originalContent;
-                            button.disabled = false;
-                        }, 2500);
-                    })
-                    .catch((error) => {
-                        console.error('PDF generation failed:', error);
-                        button.innerHTML = `
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <circle cx="12" cy="12" r="10"/>
-                                <line x1="15" y1="9" x2="9" y2="15"/>
-                                <line x1="9" y1="9" x2="15" y2="15"/>
-                            </svg>
-                            Failed - Try Again
-                        `;
-                        setTimeout(() => {
-                            button.innerHTML = originalContent;
-                            button.disabled = false;
-                        }, 3000);
+                    height: certificate.scrollHeight,
+                    windowWidth: window.innerWidth,
+                    windowHeight: window.innerHeight
+                }).then(canvas => {
+                    // Create PDF using jsPDF
+                    const { jsPDF } = window.jspdf;
+                    
+                    // A4 landscape dimensions in mm
+                    const pdfWidth = 297;
+                    const pdfHeight = 210;
+                    
+                    const pdf = new jsPDF({
+                        orientation: 'landscape',
+                        unit: 'mm',
+                        format: 'a4',
+                        compress: true
                     });
-            }, 500);
+                    
+                    // Convert canvas to image
+                    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+                    
+                    // Calculate dimensions to fit the entire certificate on one page
+                    const imgWidth = canvas.width;
+                    const imgHeight = canvas.height;
+                    const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
+                    
+                    const finalWidth = imgWidth * ratio;
+                    const finalHeight = imgHeight * ratio;
+                    
+                    // Center the image on the PDF page
+                    const x = (pdfWidth - finalWidth) / 2;
+                    const y = (pdfHeight - finalHeight) / 2;
+                    
+                    // Add image to PDF
+                    pdf.addImage(imgData, 'JPEG', x, y, finalWidth, finalHeight);
+                    
+                    // Generate filename
+                    const filename = `${eventName.replace(/[^a-zA-Z0-9]/g, '_')}_Certificate_${participantName.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+                    
+                    // Save the PDF
+                    pdf.save(filename);
+                    
+                    // Success feedback
+                    button.innerHTML = `
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M20 6 9 17l-5-5"/>
+                        </svg>
+                        Success!
+                    `;
+                    
+                    setTimeout(() => {
+                        button.innerHTML = originalContent;
+                        button.disabled = false;
+                    }, 2000);
+                    
+                }).catch(error => {
+                    console.error('PDF generation failed:', error);
+                    button.innerHTML = `
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <line x1="15" y1="9" x2="9" y2="15"/>
+                            <line x1="9" y1="9" x2="15" y2="15"/>
+                        </svg>
+                        Failed
+                    `;
+                    
+                    setTimeout(() => {
+                        button.innerHTML = originalContent;
+                        button.disabled = false;
+                    }, 3000);
+                });
+            }, 1000);
         }
 
+        // Keyboard shortcut
         document.addEventListener('keydown', function(e) {
             if ((e.ctrlKey || e.metaKey) && e.key === 'd') {
                 e.preventDefault();
@@ -629,11 +616,8 @@
             }
         });
 
+        // Prevent right-click on certificate
         document.getElementById('certificate').addEventListener('contextmenu', function(e) {
-            e.preventDefault();
-        });
-
-        document.getElementById('certificate').addEventListener('selectstart', function(e) {
             e.preventDefault();
         });
     </script>
