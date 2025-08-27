@@ -1196,7 +1196,6 @@ def check_plagiarism():
             "error": "Analysis failed",
             "message": str(e)
         }), 500
-    
 @app.route("/sponsor-showcase", methods=["POST"])
 @token_required
 def add_sponsor_showcase():
@@ -1326,9 +1325,31 @@ def get_sponsor_showcases():
     sponsors = hackathon.get("sponsors", [])
     showcases = []
     
+    # Check if we need to migrate any sponsors missing isActive field
+    migration_needed = False
+    for sponsor in sponsors:
+        if "showcase" in sponsor and "isActive" not in sponsor["showcase"]:
+            sponsor["showcase"]["isActive"] = True
+            migration_needed = True
+    
+    # If migration was needed, update the database
+    if migration_needed:
+        try:
+            hackathons.update_one(
+                {"hackCode": hack_code},
+                {"$set": {"sponsors": sponsors}}
+            )
+            logger.info(f"Migrated isActive field for sponsors in hackathon {hack_code}")
+        except Exception as e:
+            logger.error(f"Error migrating sponsor data: {str(e)}")
+    
     for sponsor in sponsors:
         if "showcase" in sponsor:
             showcase = sponsor["showcase"]
+            # Ensure isActive is always explicitly set (default to True for backwards compatibility)
+            if "isActive" not in showcase:
+                showcase["isActive"] = True
+            
             if not active_only or showcase.get("isActive", True):
                 sponsor_info = {
                     "name": sponsor.get("name", ""),
@@ -1479,6 +1500,7 @@ def reorder_sponsor_showcases():
         logger.error(f"Error reordering sponsor showcases: {str(e)}")
         return jsonify({"error": "Failed to reorder sponsor showcases", "details": str(e)}), 500
     
+
     
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8000, debug=True)
