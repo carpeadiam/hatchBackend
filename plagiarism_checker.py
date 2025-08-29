@@ -226,49 +226,104 @@ class GitHubService:
         return commits[:limit] if isinstance(commits, list) else []
     
     def get_file_content(self, owner: str, repo: str, path: str, ref: str = "main") -> Optional[str]:
-        """Get file content from repository"""
-        try:
-            data = self._make_request(f"repos/{owner}/{repo}/contents/{path}", {"ref": ref})
-            if data.get("encoding") == "base64":
-                content = base64.b64decode(data["content"]).decode('utf-8', errors='ignore')
-                return content
-        except Exception as e:
-            print(f"Failed to get file content for {path}: {e}")
-            # Try with 'master' branch if 'main' fails
-            if ref == "main":
-                try:
-                    data = self._make_request(f"repos/{owner}/{repo}/contents/{path}", {"ref": "master"})
-                    if data.get("encoding") == "base64":
+        """Get file content from repository with enhanced error handling"""
+        print(f"Attempting to get content for file: {path}")
+        
+        # Try different branch names
+        branches_to_try = [ref, "main", "master"]
+        if ref not in branches_to_try:
+            branches_to_try.insert(0, ref)
+        
+        for branch in branches_to_try:
+            try:
+                print(f"Trying to get {path} from branch: {branch}")
+                data = self._make_request(f"repos/{owner}/{repo}/contents/{path}", {"ref": branch})
+                
+                if data and data.get("encoding") == "base64":
+                    try:
                         content = base64.b64decode(data["content"]).decode('utf-8', errors='ignore')
+                        print(f"Successfully retrieved content for {path} from {branch} ({len(content)} chars)")
                         return content
-                except Exception:
-                    pass
+                    except Exception as decode_error:
+                        print(f"Failed to decode content for {path}: {decode_error}")
+                        continue
+                else:
+                    print(f"No valid content data for {path} from {branch}")
+                    
+            except Exception as e:
+                print(f"Failed to get file content for {path} from {branch}: {e}")
+                continue
+        
+        print(f"Failed to get content for {path} from any branch")
         return None
     
     def get_repository_files(self, owner: str, repo: str, limit: int = 50) -> List[Dict]:
-        """Get repository file tree"""
+        """Get repository file tree with enhanced error handling and debugging"""
         try:
-            # Try main branch first, then master
-            for branch in ["main", "master"]:
+            print(f"Attempting to get repository files for {owner}/{repo}")
+            
+            # Try main branch first, then master, then default branch
+            branches_to_try = ["main", "master"]
+            tree_data = None
+            
+            # First, get repository info to find default branch
+            try:
+                repo_info = self._make_request(f"repos/{owner}/{repo}")
+                default_branch = repo_info.get("default_branch", "main")
+                if default_branch not in branches_to_try:
+                    branches_to_try.insert(0, default_branch)
+                print(f"Repository default branch: {default_branch}")
+            except Exception as e:
+                print(f"Could not get repo info: {e}")
+            
+            # Try each branch
+            for branch in branches_to_try:
                 try:
+                    print(f"Trying branch: {branch}")
                     tree_data = self._make_request(f"repos/{owner}/{repo}/git/trees/{branch}", {"recursive": "1"})
                     if tree_data and "tree" in tree_data:
+                        print(f"Successfully retrieved tree from branch: {branch}")
                         break
-                except Exception:
+                    else:
+                        print(f"No tree data from branch: {branch}")
+                except Exception as e:
+                    print(f"Failed to get tree from branch {branch}: {e}")
                     continue
-            else:
+            
+            if not tree_data or "tree" not in tree_data:
+                print("Failed to retrieve repository tree from any branch")
                 return []
+            
+            print(f"Total items in repository tree: {len(tree_data.get('tree', []))}")
             
             files = []
             for item in tree_data.get("tree", []):
-                if item["type"] == "blob" and self._is_code_file(item["path"]):
-                    files.append(item)
+                if item["type"] == "blob":
+                    print(f"Found blob: {item['path']} (size: {item.get('size', 'unknown')})")
+                    
+                    if self._is_code_file(item["path"]):
+                        # Add size information if available
+                        file_info = {
+                            "path": item["path"],
+                            "sha": item["sha"],
+                            "size": item.get("size", 0),
+                            "url": item.get("url", "")
+                        }
+                        files.append(file_info)
+                        print(f"Added code file: {item['path']} (size: {item.get('size', 'unknown')})")
+                    else:
+                        print(f"Skipped non-code file: {item['path']}")
+                    
                     if len(files) >= limit:
                         break
             
+            print(f"Found {len(files)} code files (limit: {limit})")
             return files
+            
         except Exception as e:
             print(f"Failed to get repository files: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def search_code(self, query: str, language: str = None, max_results: int = None) -> List[Dict]:
@@ -317,9 +372,56 @@ class GitHubService:
     
     @staticmethod
     def _is_code_file(path: str) -> bool:
-        """Check if file is a code file based on extension"""
-        code_extensions = {'.py', '.js', '.java', '.cpp', '.c', '.h', '.cs', '.php', '.rb', '.go'}
-        return any(path.endswith(ext) for ext in code_extensions)
+        """Check if file is a code file based on extension with enhanced detection"""
+        path_lower = path.lower()
+        
+        # Code file extensions (expanded list)
+        code_extensions = {
+            '.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.cpp', '.c', '.cc', '.cxx',
+            '.h', '.hpp', '.cs', '.php', '.rb', '.go', '.rs', '.swift', '.kt', '.scala',
+            '.m', '.mm', '.pl', '.sh', '.ps1', '.r', '.matlab', '.sql', '.html', '.css',
+            '.scss', '.sass', '.less', '.vue', '.dart', '.lua', '.perl', '.asm', '.s',
+            '.yml', '.yaml', '.xml', '.json', '.md', '.txt'  # Include config and text files too
+        }
+        
+        # Check file extension
+        has_code_ext = any(path_lower.endswith(ext) for ext in code_extensions)
+        
+        # Also include files without extensions that might be scripts or important files
+        if not has_code_ext and '.' not in path.split('/')[-1]:  # No extension
+            # Common script names and important files without extensions
+            filename = path.split('/')[-1].lower()
+            important_files = {
+                'dockerfile', 'makefile', 'rakefile', 'gemfile', 'vagrantfile',
+                'procfile', 'gruntfile', 'gulpfile', 'webpack', 'readme', 'license',
+                'changelog', 'contributing', 'authors', 'install', 'usage'
+            }
+            has_code_ext = filename in important_files
+            
+            # If it's README, we definitely want to include it
+            if filename == 'readme':
+                has_code_ext = True
+        
+        # Exclude certain directories but be less restrictive
+        exclude_patterns = [
+            'node_modules/', '.git/', '__pycache__/', '.vscode/', '.idea/',
+            'dist/', 'build/', 'target/', 'bin/', 'obj/', 'out/', '.next/',
+            'coverage/', '.nyc_output/', 'vendor/', 'packages/'
+        ]
+        
+        # Only exclude if it's clearly in an excluded directory
+        is_excluded = any(f'/{pattern}' in f'/{path_lower}' or path_lower.startswith(pattern) for pattern in exclude_patterns)
+        
+        result = has_code_ext and not is_excluded
+        
+        if result:
+            print(f"✅ Accepted code file: {path}")
+        elif has_code_ext and is_excluded:
+            print(f"❌ Excluded code file: {path} (matches exclusion pattern)")
+        else:
+            print(f"⏭️  Skipped file: {path} (not recognized as code)")
+        
+        return result
 
 # ============================================================================
 # COMMIT ANALYSIS
@@ -494,10 +596,16 @@ class SimilarityService:
         self.normalizer = CodeNormalizer()
     
     def analyze_intra_repo_similarity(self, owner: str, repo: str) -> Dict:
-        """Analyze similarity within the repository"""
-        files = self.github.get_repository_files(owner, repo, Config.MAX_FILES_TO_ANALYZE)
+        """Analyze similarity within the repository with enhanced debugging"""
+        print(f"Starting intra-repository analysis for {owner}/{repo}")
+        
+        max_files = min(Config.MAX_FILES_TO_ANALYZE, 20)  # Reasonable limit
+        files = self.github.get_repository_files(owner, repo, max_files)
+        
+        print(f"Retrieved {len(files)} files for intra-repo analysis")
         
         if len(files) < 2:
+            print(f"Not enough files for comparison: {len(files)}")
             return {"score": 0, "similar_files": [], "file_count": len(files)}
         
         # Get file contents
@@ -506,45 +614,74 @@ class SimilarityService:
             content = self.github.get_file_content(owner, repo, file_info["path"])
             if content and len(content.strip()) > 50:  # Only include substantial files
                 file_contents[file_info["path"]] = content
+                print(f"Loaded content for {file_info['path']} ({len(content)} chars)")
+            else:
+                print(f"Skipped {file_info['path']} - content too small or unavailable")
+        
+        print(f"Loaded content for {len(file_contents)} files")
         
         if len(file_contents) < 2:
+            print("Not enough files with content for comparison")
             return {"score": 0, "similar_files": [], "file_count": len(file_contents)}
         
         # Compare files for similarity
         similar_pairs = []
         file_paths = list(file_contents.keys())
         
+        print(f"Comparing {len(file_paths)} files for similarity...")
+        
+        comparisons_made = 0
         for i in range(len(file_paths)):
             for j in range(i + 1, len(file_paths)):
                 path1, path2 = file_paths[i], file_paths[j]
-                similarity = self._calculate_similarity(
-                    file_contents[path1], 
-                    file_contents[path2]
-                )
                 
-                if similarity > 0.6:  # 60% similarity threshold
-                    similar_pairs.append({
-                        "file1": path1,
-                        "file2": path2,
-                        "similarity": round(similarity, 3)
-                    })
+                try:
+                    similarity = self._calculate_similarity(
+                        file_contents[path1], 
+                        file_contents[path2]
+                    )
+                    
+                    comparisons_made += 1
+                    print(f"Similarity between {path1} and {path2}: {similarity:.3f}")
+                    
+                    if similarity > 0.6:  # 60% similarity threshold
+                        similar_pairs.append({
+                            "file1": path1,
+                            "file2": path2,
+                            "similarity": round(similarity, 3)
+                        })
+                        print(f"Added similar pair: {path1} <-> {path2} ({similarity:.3f})")
+                        
+                except Exception as e:
+                    print(f"Error comparing {path1} and {path2}: {e}")
+                    continue
+        
+        print(f"Made {comparisons_made} comparisons, found {len(similar_pairs)} similar pairs")
         
         # Calculate score based on similar pairs
         max_possible_pairs = len(file_paths) * (len(file_paths) - 1) // 2
         similarity_ratio = len(similar_pairs) / max_possible_pairs if max_possible_pairs > 0 else 0
         
+        score = min(similarity_ratio * 200, 100)  # Amplify the score
+        print(f"Intra-repo similarity score: {score:.2f}%")
+        
         return {
-            "score": min(similarity_ratio * 200, 100),  # Amplify the score
+            "score": score,
             "similar_files": similar_pairs,
-            "file_count": len(file_contents)
+            "file_count": len(file_contents),
+            "comparisons_made": comparisons_made
         }
     
     def analyze_inter_repo_similarity(self, owner: str, repo: str) -> Dict:
         """Analyze similarity with other repositories - ENHANCED VERSION"""
+        # Inter-repo analysis with enhanced debugging
         max_files = min(10, getattr(Config, 'MAX_FILES_TO_ANALYZE', 30) // 3)
         files = self.github.get_repository_files(owner, repo, max_files)
         
+        print(f"Retrieved {len(files)} files for inter-repo analysis")
+        
         if not files:
+            print("No files found for inter-repository analysis")
             return {"score": 0, "matches": [], "files_checked": 0, "search_attempts": 0}
         
         matches = []
@@ -1071,30 +1208,57 @@ class PlagiarismChecker:
         self.scoring_service = ScoringService()
     
     def check_repository(self, repo_url: str) -> Dict:
-        """Main method to check a repository for plagiarism"""
+        """Main method to check a repository for plagiarism with enhanced debugging"""
         try:
             # Parse repository URL
             owner, repo = parse_github_url(repo_url)
             print(f"Analyzing repository: {owner}/{repo}")
             
             # Get basic repository info
+            print("Getting repository information...")
             repo_info = self.github_service.get_repository_info(owner, repo)
             
-            # Run all analyses
-            print("Running commit analysis...")
-            commit_analysis = self.commit_analyzer.analyze_commits(owner, repo)
+            if not repo_info:
+                raise Exception("Repository not found or inaccessible")
             
-            print("Running intra-repository similarity analysis...")
-            intra_repo_analysis = self.similarity_service.analyze_intra_repo_similarity(owner, repo)
+            print(f"Repository info: {repo_info.get('name', 'N/A')}, Language: {repo_info.get('language', 'N/A')}, Size: {repo_info.get('size', 0)} KB")
             
-            print("Running inter-repository similarity analysis...")
-            inter_repo_analysis = self.similarity_service.analyze_inter_repo_similarity(owner, repo)
+            # Run all analyses with error handling
+            print("\n=== Running commit analysis ===")
+            try:
+                commit_analysis = self.commit_analyzer.analyze_commits(owner, repo)
+                print(f"Commit analysis completed: {commit_analysis.get('commit_count', 0)} commits, score: {commit_analysis.get('score', 0):.2f}%")
+            except Exception as e:
+                print(f"Commit analysis failed: {e}")
+                commit_analysis = {"score": 0, "indicators": ["Commit analysis failed"], "commit_count": 0}
+            
+            print("\n=== Running intra-repository similarity analysis ===")
+            try:
+                intra_repo_analysis = self.similarity_service.analyze_intra_repo_similarity(owner, repo)
+                print(f"Intra-repo analysis completed: {intra_repo_analysis.get('file_count', 0)} files, score: {intra_repo_analysis.get('score', 0):.2f}%")
+            except Exception as e:
+                print(f"Intra-repo analysis failed: {e}")
+                import traceback
+                traceback.print_exc()
+                intra_repo_analysis = {"score": 0, "similar_files": [], "file_count": 0}
+            
+            print("\n=== Running inter-repository similarity analysis ===")
+            try:
+                inter_repo_analysis = self.similarity_service.analyze_inter_repo_similarity(owner, repo)
+                print(f"Inter-repo analysis completed: {inter_repo_analysis.get('files_checked', 0)} files checked, score: {inter_repo_analysis.get('score', 0):.2f}%")
+            except Exception as e:
+                print(f"Inter-repo analysis failed: {e}")
+                import traceback
+                traceback.print_exc()
+                inter_repo_analysis = {"score": 0, "matches": [], "files_checked": 0, "search_attempts": 0}
             
             # Calculate final score
-            print("Calculating final plagiarism score...")
+            print("\n=== Calculating final plagiarism score ===")
             final_analysis = self.scoring_service.calculate_plagiarism_score(
                 commit_analysis, intra_repo_analysis, inter_repo_analysis
             )
+            
+            print(f"Final analysis completed: Risk Level: {final_analysis.get('risk_level', 'UNKNOWN')}, Score: {final_analysis.get('final_score', 0):.2f}%")
             
             return {
                 "repository": {
@@ -1113,11 +1277,13 @@ class PlagiarismChecker:
                     "final_assessment": final_analysis
                 },
                 "timestamp": datetime.utcnow().isoformat(),
-                "version": "1.0"
+                "version": "1.1"  # Updated version
             }
             
         except Exception as e:
             print(f"Analysis failed: {e}")
+            import traceback
+            traceback.print_exc()
             raise Exception(f"Analysis failed: {str(e)}")
 
 # ============================================================================
