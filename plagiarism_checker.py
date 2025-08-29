@@ -20,15 +20,25 @@ from datasketch import MinHashLSH, MinHash
 class Config:
     GITHUB_TOKEN = os.getenv('GITHUB_TOKEN', '')
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-key-change-in-production')
-    CACHE_TTL = 3600  # 1 hour
-    MAX_FILES_TO_ANALYZE = 50
-    MAX_COMMITS_TO_ANALYZE = 100
-    RATE_LIMIT_DELAY = 1.0  # seconds between API calls
+    CACHE_TTL = 7200  # 2 hours (increased for Azure)
+    MAX_FILES_TO_ANALYZE = 30  # Reduced for better token management
+    MAX_COMMITS_TO_ANALYZE = 50  # Reduced for better token management
+    RATE_LIMIT_DELAY = 2.0  # Increased delay for better token conservation
+    
+    # Inter-repo search limits for token conservation
+    MAX_SEARCH_QUERIES = 8  # Maximum search queries per analysis
+    MAX_RESULTS_PER_QUERY = 5  # Maximum results to process per query
+    SNIPPET_MIN_LENGTH = 30  # Minimum snippet length for search
+    SNIPPET_MAX_LENGTH = 150  # Maximum snippet length for search
     
     # Scoring weights
     COMMIT_WEIGHT = 0.3
     INTRA_REPO_WEIGHT = 0.4
     INTER_REPO_WEIGHT = 0.3
+    
+    # Azure deployment settings
+    AZURE_FRIENDLY = True
+    TIMEOUT_SECONDS = 120  # 2 minutes timeout for Azure
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -43,11 +53,19 @@ _last_api_call = 0
 # ============================================================================
 
 def rate_limit():
-    """Simple rate limiter for API calls"""
+    """Enhanced rate limiter with exponential backoff for API calls"""
     global _last_api_call
     now = time.time()
-    if now - _last_api_call < Config.RATE_LIMIT_DELAY:
-        time.sleep(Config.RATE_LIMIT_DELAY - (now - _last_api_call))
+    delay = Config.RATE_LIMIT_DELAY
+    
+    # Add jitter to avoid thundering herd
+    import random
+    jitter = random.uniform(0.1, 0.5)
+    delay += jitter
+    
+    if now - _last_api_call < delay:
+        sleep_time = delay - (now - _last_api_call)
+        time.sleep(sleep_time)
     _last_api_call = time.time()
 
 def cache_get(key: str) -> Optional[Any]:
@@ -152,7 +170,7 @@ class GitHubService:
         }
     
     def _make_request(self, endpoint: str, params: Optional[Dict] = None) -> Dict:
-        """Make rate-limited API request"""
+        """Make rate-limited API request with enhanced error handling"""
         rate_limit()
         cache_key = f"github_{endpoint}_{hash(str(params))}"
         
@@ -163,11 +181,26 @@ class GitHubService:
         
         url = f"{self.base_url}/{endpoint}"
         try:
-            response = requests.get(url, headers=self.headers, params=params or {}, timeout=30)
+            response = requests.get(
+                url, 
+                headers=self.headers, 
+                params=params or {}, 
+                timeout=Config.TIMEOUT_SECONDS if hasattr(Config, 'TIMEOUT_SECONDS') else 30
+            )
             
+            # Enhanced rate limit handling
             if response.status_code == 403:
-                print(f"Rate limit exceeded or forbidden: {response.text}")
-                raise Exception("GitHub API rate limit exceeded or access forbidden")
+                remaining = response.headers.get('X-RateLimit-Remaining', '0')
+                reset_time = response.headers.get('X-RateLimit-Reset', '0')
+                print(f"Rate limit hit. Remaining: {remaining}, Reset: {reset_time}")
+                
+                # If we're close to rate limit, add exponential backoff
+                if int(remaining) < 10:
+                    backoff_time = min(60, 2 ** (10 - int(remaining)))  # Max 60 seconds
+                    print(f"Low rate limit remaining, backing off for {backoff_time} seconds")
+                    time.sleep(backoff_time)
+                
+                raise Exception(f"GitHub API rate limit exceeded. Remaining: {remaining}")
             elif response.status_code == 422:
                 print(f"Search query validation failed: {response.text}")
                 return {"items": []} if "search" in endpoint else {}
@@ -238,31 +271,48 @@ class GitHubService:
             print(f"Failed to get repository files: {e}")
             return []
     
-    def search_code(self, query: str, language: str = None) -> List[Dict]:
-        """Search for code across GitHub"""
+    def search_code(self, query: str, language: str = None, max_results: int = None) -> List[Dict]:
+        """Search for code across GitHub with enhanced filtering"""
         # Clean and validate query
         query = query.strip()
-        if len(query) < 10:  # GitHub requires minimum query length
-            print(f"Query too short: {query}")
+        min_length = getattr(Config, 'SNIPPET_MIN_LENGTH', 30)
+        max_length = getattr(Config, 'SNIPPET_MAX_LENGTH', 150)
+        
+        if len(query) < min_length:
+            print(f"Query too short ({len(query)} < {min_length}): {query[:50]}...")
             return []
         
-        # Escape special characters and ensure it's searchable
-        query = query.replace('"', '\\"')
+        # Truncate if too long
+        if len(query) > max_length:
+            query = query[:max_length]
+        
+        # Enhanced query cleaning for better results
+        query = re.sub(r'[^\w\s\(\)\{\}\[\]\.,;:]', ' ', query)
+        query = re.sub(r'\s+', ' ', query).strip()
+        
+        if len(query) < min_length:
+            return []
+        
+        # Build search query with better escaping
         search_query = f'"{query}"'
         
         if language:
             search_query += f" language:{language}"
         
-        params = {"q": search_query, "per_page": 10}
+        # Add filters to improve result quality
+        search_query += " NOT filename:README NOT filename:LICENSE"
+        
+        max_results = max_results or getattr(Config, 'MAX_RESULTS_PER_QUERY', 5)
+        params = {"q": search_query, "per_page": max_results}
         
         try:
-            print(f"Searching GitHub for: {search_query}")
+            print(f"Searching GitHub for: {search_query[:100]}...")
             result = self._make_request("search/code", params)
             items = result.get("items", [])
-            print(f"Found {len(items)} results")
-            return items
+            print(f"Found {len(items)} results for query")
+            return items[:max_results]  # Ensure we don't exceed our limit
         except Exception as e:
-            print(f"Search failed: {e}")
+            print(f"Search failed for query '{query[:50]}...': {e}")
             return []
     
     @staticmethod
@@ -490,31 +540,46 @@ class SimilarityService:
         }
     
     def analyze_inter_repo_similarity(self, owner: str, repo: str) -> Dict:
-        """Analyze similarity with other repositories - FIXED VERSION"""
-        files = self.github.get_repository_files(owner, repo, 10)
+        """Analyze similarity with other repositories - ENHANCED VERSION"""
+        max_files = min(10, getattr(Config, 'MAX_FILES_TO_ANALYZE', 30) // 3)
+        files = self.github.get_repository_files(owner, repo, max_files)
         
         if not files:
-            return {"score": 0, "matches": [], "files_checked": 0}
+            return {"score": 0, "matches": [], "files_checked": 0, "search_attempts": 0}
         
         matches = []
         files_checked = 0
         total_search_attempts = 0
+        max_search_queries = getattr(Config, 'MAX_SEARCH_QUERIES', 8)
         
-        print(f"Analyzing {len(files)} files for inter-repo similarity...")
+        print(f"Analyzing {len(files)} files for inter-repo similarity (max {max_search_queries} searches)...")
         
-        for file_info in files[:5]:  # Limit to first 5 files
+        # Prioritize larger, more significant files
+        prioritized_files = self._prioritize_files_for_analysis(files, owner, repo)
+        
+        for file_info in prioritized_files[:max_files]:  # Respect file limit
+            if total_search_attempts >= max_search_queries:
+                print(f"Reached maximum search queries limit ({max_search_queries})")
+                break
+                
             content = self.github.get_file_content(owner, repo, file_info["path"])
             if not content or len(content.strip()) < 100:  # Skip small files
                 continue
             
             files_checked += 1
-            print(f"Checking file: {file_info['path']}")
+            print(f"Checking file: {file_info['path']} ({len(content)} chars)")
             
-            # Extract multiple code snippets for better coverage
-            snippets = self._extract_multiple_snippets(content)
+            # Extract high-quality snippets for searching
+            snippets = self._extract_high_quality_snippets(content, file_info["path"])
             
-            for snippet in snippets:
-                if not snippet or len(snippet.strip()) < 20:
+            # Limit snippets per file to conserve API calls
+            max_snippets_per_file = max(1, max_search_queries // max_files)
+            
+            for snippet in snippets[:max_snippets_per_file]:
+                if total_search_attempts >= max_search_queries:
+                    break
+                    
+                if not self._is_snippet_worth_searching(snippet):
                     continue
                 
                 total_search_attempts += 1
@@ -522,47 +587,57 @@ class SimilarityService:
                 # Determine language from file extension
                 language = self._get_language_from_path(file_info["path"])
                 
-                # Search for similar code
-                search_results = self.github.search_code(snippet, language)
+                # Search for similar code with conservative limits
+                search_results = self.github.search_code(
+                    snippet, 
+                    language, 
+                    max_results=getattr(Config, 'MAX_RESULTS_PER_QUERY', 5)
+                )
                 
-                for result in search_results[:3]:  # Limit results
+                # Process results with quality filtering
+                for result in search_results:
                     result_repo = f"{result['repository']['owner']['login']}/{result['repository']['name']}"
                     if result_repo != f"{owner}/{repo}":
-                        matches.append({
+                        # Calculate similarity confidence
+                        confidence = self._calculate_match_confidence(snippet, result)
+                        
+                        match_data = {
                             "file": file_info["path"],
                             "match_repo": result_repo,
                             "match_file": result["path"],
                             "snippet": snippet[:100] + "..." if len(snippet) > 100 else snippet,
-                            "match_url": result.get("html_url", "")
-                        })
-                        print(f"Found match in {result_repo}")
+                            "match_url": result.get("html_url", ""),
+                            "confidence": confidence,
+                            "language": language or "unknown"
+                        }
+                        matches.append(match_data)
+                        print(f"Found match in {result_repo} (confidence: {confidence:.2f})")
                 
-                # Break if we found matches to avoid too many API calls
-                if len(matches) >= 3:
+                # Stop if we have sufficient high-quality matches
+                high_conf_matches = [m for m in matches if m.get('confidence', 0) > 0.7]
+                if len(high_conf_matches) >= 3:
+                    print("Found sufficient high-confidence matches, stopping search")
                     break
             
-            if len(matches) >= 3:
+            # Stop file processing if we have enough evidence
+            if len(matches) >= 5:
                 break
         
-        # Calculate score based on matches found
-        if files_checked > 0:
-            match_ratio = len(matches) / files_checked
-            # Give higher weight to actual matches
-            score = min(match_ratio * 150, 100)  # Amplify score if matches found
-        else:
-            score = 0
+        # Enhanced scoring based on match quality
+        score = self._calculate_inter_repo_score(matches, files_checked, total_search_attempts)
         
-        print(f"Inter-repo analysis complete: {len(matches)} matches found from {files_checked} files")
+        print(f"Inter-repo analysis complete: {len(matches)} matches found from {files_checked} files, {total_search_attempts} searches")
         
         return {
             "score": score,
-            "matches": matches,
+            "matches": matches[:10],  # Limit returned matches
             "files_checked": files_checked,
-            "search_attempts": total_search_attempts
+            "search_attempts": total_search_attempts,
+            "high_confidence_matches": len([m for m in matches if m.get('confidence', 0) > 0.7])
         }
     
-    def _extract_multiple_snippets(self, content: str) -> List[str]:
-        """Extract multiple code snippets for searching"""
+    def _extract_high_quality_snippets(self, content: str, file_path: str) -> List[str]:
+        """Extract high-quality code snippets optimized for searching"""
         snippets = []
         
         # Normalize and clean content
@@ -572,26 +647,179 @@ class SimilarityService:
         if len(lines) < 3:
             return []
         
-        # Extract function/class definitions
-        function_lines = [line for line in lines if re.match(r'^\s*(def|class|function|public|private)\s+', line)]
-        for line in function_lines:
-            if len(line) > 15:
-                snippets.append(line)
+        # Extract function/class definitions with context
+        function_patterns = [
+            r'^\s*(def|class|function|public\s+class|private\s+class)\s+\w+',
+            r'^\s*(public|private|protected)\s+\w+\s+\w+\s*\(',
+            r'^\s*\w+\s*=\s*function\s*\(',
+        ]
         
-        # Extract distinctive code blocks (4-5 consecutive lines)
-        for i in range(len(lines) - 3):
-            block = '\n'.join(lines[i:i+4])
-            if len(block) > 50 and not self._is_common_block(block):
-                snippets.append(block)
+        for i, line in enumerate(lines):
+            for pattern in function_patterns:
+                if re.match(pattern, line) and len(line) > 20:
+                    # Include some context (2-3 lines)
+                    context_start = max(0, i)
+                    context_end = min(len(lines), i + 3)
+                    context_block = '\n'.join(lines[context_start:context_end])
+                    if len(context_block) >= 40:
+                        snippets.append(context_block)
+                    break
         
-        # Extract longer distinctive lines
+        # Extract algorithm-like blocks (loops, conditionals with logic)
+        for i in range(len(lines) - 2):
+            if re.match(r'^\s*(for|while|if)\s+', lines[i]):
+                block = '\n'.join(lines[i:i+3])
+                if len(block) > 50 and self._contains_meaningful_logic(block):
+                    snippets.append(block)
+        
+        # Extract unique computational or algorithmic lines
         for line in lines:
-            if len(line) > 25 and not self._is_common_line(line):
+            if (len(line) > 30 and 
+                self._is_algorithmic_line(line) and 
+                not self._is_common_line(line)):
                 snippets.append(line)
         
-        # Remove duplicates and return top snippets
+        # Remove duplicates and prioritize by quality
         unique_snippets = list(set(snippets))
-        return unique_snippets[:5]  # Return top 5 snippets
+        prioritized = self._prioritize_snippets_by_quality(unique_snippets, file_path)
+        
+        return prioritized[:3]  # Return top 3 quality snippets
+    
+    def _prioritize_files_for_analysis(self, files: List[Dict], owner: str, repo: str) -> List[Dict]:
+        """Prioritize files based on their likelihood to contain unique code"""
+        def file_priority(file_info):
+            path = file_info["path"].lower()
+            score = 0
+            
+            # Prefer source files over config/test files
+            if any(path.endswith(ext) for ext in ['.py', '.js', '.java', '.cpp', '.c']):
+                score += 10
+            
+            # Avoid test, config, and documentation files
+            if any(keyword in path for keyword in ['test', 'spec', 'config', 'readme', 'doc']):
+                score -= 5
+            
+            # Prefer files in src, lib, app directories
+            if any(keyword in path for keyword in ['src/', 'lib/', 'app/', 'core/']):
+                score += 5
+            
+            # Prefer larger files (more content to analyze)
+            score += min(file_info.get("size", 0) / 1000, 5)  # Max 5 points for size
+            
+            return score
+        
+        return sorted(files, key=file_priority, reverse=True)
+    
+    def _is_snippet_worth_searching(self, snippet: str) -> bool:
+        """Determine if a snippet is worth using for GitHub search"""
+        if not snippet or len(snippet.strip()) < getattr(Config, 'SNIPPET_MIN_LENGTH', 30):
+            return False
+        
+        # Check if snippet has meaningful content
+        lines = snippet.split('\n')
+        meaningful_lines = 0
+        
+        for line in lines:
+            line = line.strip()
+            if (len(line) > 10 and 
+                not re.match(r'^[{}()\[\]\s]*$', line) and  # Not just brackets
+                not re.match(r'^(import|from|#|//)', line)):   # Not imports or comments
+                meaningful_lines += 1
+        
+        return meaningful_lines >= 2
+    
+    def _contains_meaningful_logic(self, block: str) -> bool:
+        """Check if code block contains meaningful algorithmic logic"""
+        # Look for operators, function calls, assignments
+        logic_patterns = [
+            r'[+\-*/=<>!&|]',  # Operators
+            r'\w+\s*\(',       # Function calls
+            r'\w+\s*\[',       # Array access
+            r'\.(\w+)',       # Method calls
+        ]
+        
+        return any(re.search(pattern, block) for pattern in logic_patterns)
+    
+    def _is_algorithmic_line(self, line: str) -> bool:
+        """Check if line contains algorithmic content"""
+        algorithmic_patterns = [
+            r'\w+\s*=\s*\w+.*[+\-*/]',  # Calculations
+            r'(sort|filter|map|reduce)\s*\(',  # Data processing
+            r'(if|while|for)\s+.*[<>=!]',  # Control flow with conditions
+            r'\w+\.(append|push|pop|insert)',  # Data structure operations
+        ]
+        
+        return any(re.search(pattern, line) for pattern in algorithmic_patterns)
+    
+    def _prioritize_snippets_by_quality(self, snippets: List[str], file_path: str) -> List[str]:
+        """Prioritize snippets by their uniqueness and search potential"""
+        def snippet_quality(snippet):
+            score = 0
+            
+            # Longer snippets are generally more unique
+            score += min(len(snippet) / 20, 5)
+            
+            # Prefer snippets with specific identifiers
+            if re.search(r'\w{6,}', snippet):  # Long identifiers
+                score += 3
+            
+            # Prefer snippets with multiple operators or function calls
+            operators = len(re.findall(r'[+\-*/=<>!&|]', snippet))
+            score += min(operators, 3)
+            
+            # Avoid overly generic snippets
+            if re.search(r'^\s*(print|console\.log|return|if\s+True)', snippet):
+                score -= 2
+            
+            return score
+        
+        return sorted(snippets, key=snippet_quality, reverse=True)
+    
+    def _calculate_match_confidence(self, snippet: str, result: Dict) -> float:
+        """Calculate confidence score for a search result match"""
+        confidence = 0.5  # Base confidence
+        
+        # Higher confidence for longer snippets
+        if len(snippet) > 80:
+            confidence += 0.2
+        
+        # Higher confidence if repository has similar name/topic
+        repo_name = result.get('repository', {}).get('name', '').lower()
+        if any(keyword in repo_name for keyword in ['project', 'assignment', 'homework']):
+            confidence += 0.3
+        
+        # Higher confidence for exact file type matches
+        result_path = result.get('path', '').lower()
+        if result_path.split('.')[-1] == snippet.split('.')[-1] if '.' in result_path else False:
+            confidence += 0.1
+        
+        return min(confidence, 1.0)
+    
+    def _calculate_inter_repo_score(self, matches: List[Dict], files_checked: int, search_attempts: int) -> float:
+        """Calculate enhanced inter-repository similarity score"""
+        if not matches or files_checked == 0:
+            return 0.0
+        
+        # Base score from match ratio
+        match_ratio = len(matches) / max(files_checked, 1)
+        base_score = min(match_ratio * 100, 80)  # Cap at 80 for base
+        
+        # Boost for high-confidence matches
+        high_conf_matches = [m for m in matches if m.get('confidence', 0) > 0.7]
+        if high_conf_matches:
+            confidence_boost = min(len(high_conf_matches) * 15, 30)
+            base_score += confidence_boost
+        
+        # Boost for multiple matches in same repository (suspicious)
+        repo_counts = {}
+        for match in matches:
+            repo = match.get('match_repo', '')
+            repo_counts[repo] = repo_counts.get(repo, 0) + 1
+        
+        if any(count > 1 for count in repo_counts.values()):
+            base_score += 20  # Significant boost for same-repo multiple matches
+        
+        return min(base_score, 100.0)
     
     def _get_language_from_path(self, path: str) -> Optional[str]:
         """Get programming language from file path"""
@@ -688,7 +916,7 @@ class ScoringService:
     def calculate_plagiarism_score(self, commit_analysis: Dict, 
                                  intra_repo_analysis: Dict, 
                                  inter_repo_analysis: Dict) -> Dict:
-        """Calculate final plagiarism score"""
+        """Calculate final plagiarism score with enhanced weighting"""
         
         # Extract individual scores
         commit_score = commit_analysis.get("score", 0)
@@ -704,32 +932,53 @@ class ScoringService:
             inter_score * Config.INTER_REPO_WEIGHT
         )
         
-        # Boost score if we have actual evidence
-        if inter_repo_analysis.get("matches"):
-            final_score = max(final_score, 40)  # Minimum 40 if matches found
+        # Enhanced boosting based on evidence quality
+        matches = inter_repo_analysis.get("matches", [])
+        high_conf_matches = inter_repo_analysis.get("high_confidence_matches", 0)
+        
+        if high_conf_matches > 0:
+            final_score = max(final_score, 50 + (high_conf_matches * 10))  # Significant boost for high confidence
+        elif matches:
+            final_score = max(final_score, 35 + (len(matches) * 5))  # Moderate boost for any matches
         
         if intra_repo_analysis.get("similar_files"):
-            final_score = max(final_score, 30)  # Minimum 30 if internal similarity found
+            similar_count = len(intra_repo_analysis["similar_files"])
+            final_score = max(final_score, 25 + (similar_count * 5))  # Boost for internal similarity
         
-        # Determine risk level
-        if final_score >= 70:
+        # Cap the maximum score
+        final_score = min(final_score, 100)
+        
+        # Determine risk level with more nuanced thresholds
+        if final_score >= 75:
             risk_level = "HIGH"
-        elif final_score >= 40:
+        elif final_score >= 50:
             risk_level = "MEDIUM"
-        elif final_score >= 15:
+        elif final_score >= 20:
             risk_level = "LOW"
         else:
             risk_level = "MINIMAL"
         
-        # Collect all indicators
+        # Collect all indicators with enhanced details
         all_indicators = []
         all_indicators.extend(commit_analysis.get("indicators", []))
         
         if intra_repo_analysis.get("similar_files"):
-            all_indicators.append(f"Found {len(intra_repo_analysis['similar_files'])} similar file pairs within repository")
+            count = len(intra_repo_analysis["similar_files"])
+            all_indicators.append(f"Found {count} similar file pairs within repository")
         
-        if inter_repo_analysis.get("matches"):
-            all_indicators.append(f"Found {len(inter_repo_analysis['matches'])} potential matches in other repositories")
+        if matches:
+            total_matches = len(matches)
+            high_conf = high_conf_matches
+            if high_conf > 0:
+                all_indicators.append(f"Found {total_matches} potential matches in other repositories ({high_conf} high-confidence)")
+            else:
+                all_indicators.append(f"Found {total_matches} potential matches in other repositories")
+        
+        # Add search efficiency indicator
+        search_attempts = inter_repo_analysis.get("search_attempts", 0)
+        files_checked = inter_repo_analysis.get("files_checked", 0)
+        if search_attempts > 0:
+            all_indicators.append(f"Analyzed {files_checked} files with {search_attempts} search queries")
         
         return {
             "final_score": round(final_score, 2),
@@ -740,25 +989,73 @@ class ScoringService:
                 "inter_repository_similarity": round(inter_score, 2)
             },
             "indicators": all_indicators,
-            "confidence": self._calculate_confidence(commit_analysis, intra_repo_analysis, inter_repo_analysis)
+            "confidence": self._calculate_confidence(commit_analysis, intra_repo_analysis, inter_repo_analysis),
+            "analysis_quality": self._assess_analysis_quality(commit_analysis, intra_repo_analysis, inter_repo_analysis)
         }
     
     def _calculate_confidence(self, commit_analysis: Dict, 
                             intra_repo_analysis: Dict, 
                             inter_repo_analysis: Dict) -> str:
-        """Calculate confidence level based on available data"""
+        """Calculate confidence level based on available data and quality"""
         
         commit_count = commit_analysis.get("commit_count", 0)
         file_count = intra_repo_analysis.get("file_count", 0)
         files_checked = inter_repo_analysis.get("files_checked", 0)
+        search_attempts = inter_repo_analysis.get("search_attempts", 0)
+        high_conf_matches = inter_repo_analysis.get("high_confidence_matches", 0)
         
-        # Base confidence on amount of data analyzed
-        if commit_count >= 10 and file_count >= 5 and files_checked >= 2:
+        # Enhanced confidence calculation
+        confidence_score = 0
+        
+        # Commit analysis quality
+        if commit_count >= 20:
+            confidence_score += 30
+        elif commit_count >= 10:
+            confidence_score += 20
+        elif commit_count >= 5:
+            confidence_score += 10
+        
+        # File analysis quality
+        if file_count >= 10:
+            confidence_score += 25
+        elif file_count >= 5:
+            confidence_score += 15
+        elif file_count >= 2:
+            confidence_score += 10
+        
+        # Search quality
+        if search_attempts >= 5 and files_checked >= 3:
+            confidence_score += 25
+        elif search_attempts >= 3 and files_checked >= 2:
+            confidence_score += 15
+        elif search_attempts >= 1:
+            confidence_score += 10
+        
+        # Bonus for high-confidence matches
+        if high_conf_matches > 0:
+            confidence_score += 20
+        
+        # Convert to categorical confidence
+        if confidence_score >= 70:
             return "HIGH"
-        elif commit_count >= 5 and file_count >= 2 and files_checked >= 1:
+        elif confidence_score >= 40:
             return "MEDIUM"
         else:
             return "LOW"
+    
+    def _assess_analysis_quality(self, commit_analysis: Dict, 
+                               intra_repo_analysis: Dict, 
+                               inter_repo_analysis: Dict) -> Dict:
+        """Assess the quality of the analysis for reporting"""
+        return {
+            "commits_analyzed": commit_analysis.get("commit_count", 0),
+            "files_analyzed": intra_repo_analysis.get("file_count", 0),
+            "files_searched": inter_repo_analysis.get("files_checked", 0),
+            "search_queries_used": inter_repo_analysis.get("search_attempts", 0),
+            "high_confidence_matches": inter_repo_analysis.get("high_confidence_matches", 0),
+            "total_matches": len(inter_repo_analysis.get("matches", [])),
+            "similar_file_pairs": len(intra_repo_analysis.get("similar_files", []))
+        }
 
 # ============================================================================
 # MAIN PLAGIARISM CHECKER

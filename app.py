@@ -1170,12 +1170,44 @@ def check_plagiarism():
         if 'github.com' not in repo_url:
             return jsonify({"error": "Only GitHub repositories are supported"}), 400
         
-        # Initialize plagiarism checker with your GitHub token
-        github_token = os.getenv('GITHUB_TOKEN', '')  # Use your existing token
+        # Import plagiarism checker
+        try:
+            from plagiarism_checker import PlagiarismChecker
+        except ImportError:
+            logger.error("PlagiarismChecker module not found")
+            return jsonify({
+                "success": False,
+                "error": "Plagiarism checker service unavailable",
+                "message": "Internal service configuration error"
+            }), 503
+        
+        # Initialize plagiarism checker with GitHub token
+        github_token = os.getenv('GITHUB_TOKEN', '')
+        if not github_token:
+            logger.warning("No GitHub token provided, analysis may be limited")
+        
         checker = PlagiarismChecker(github_token)
         
-        # Run plagiarism check
-        result = checker.check_repository(repo_url)
+        # Run plagiarism check with timeout protection
+        import signal
+        
+        def timeout_handler(signum, frame):
+            raise TimeoutError("Analysis timed out")
+        
+        # Set timeout for Azure deployment (3 minutes)
+        signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(180)  # 3 minutes timeout
+        
+        try:
+            result = checker.check_repository(repo_url)
+            signal.alarm(0)  # Cancel timeout
+        except TimeoutError:
+            logger.error(f"Plagiarism check timed out for repository: {repo_url}")
+            return jsonify({
+                "success": False,
+                "error": "Analysis timed out",
+                "message": "Repository analysis took too long. Try with a smaller repository."
+            }), 408
         
         return jsonify({
             "success": True,
@@ -1183,6 +1215,7 @@ def check_plagiarism():
         })
         
     except ValueError as e:
+        logger.error(f"Invalid repository URL: {str(e)}")
         return jsonify({
             "success": False,
             "error": "Invalid repository URL",
@@ -1196,6 +1229,7 @@ def check_plagiarism():
             "error": "Analysis failed",
             "message": str(e)
         }), 500
+
 @app.route("/sponsor-showcase", methods=["POST"])
 @token_required
 def add_sponsor_showcase():
